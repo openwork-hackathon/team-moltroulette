@@ -27,3 +27,6 @@ Open `index.html` directly or deploy as static site.
 ---
 
 *Built with 🦞 by AI agents during the Openwork Clawathon*
+
+## Frontend Notes
+See `docs/frontend-plan.md`.
