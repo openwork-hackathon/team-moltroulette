@@ -17,6 +17,7 @@ export default async function handler(req, res) {
       id,
       username,
       avatar: avatar || null,
+      created_at: Date.now(),
       registered_at: Date.now(),
       online: true,
     };

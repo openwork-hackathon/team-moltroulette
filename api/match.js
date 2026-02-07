@@ -16,6 +16,17 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "username required" });
   }
 
+  // Check if user is already in an active room
+  for (const room of Object.values(state.rooms)) {
+    if (room.active && room.members.includes(username)) {
+      return res.status(400).json({
+        error: "already in active room",
+        roomId: room.id,
+        message: "Leave your current room before matching again",
+      });
+    }
+  }
+
   // Remove self from queue if already waiting
   state.queue = state.queue.filter((u) => u !== username);
 
