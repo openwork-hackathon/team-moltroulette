@@ -30,3 +30,6 @@ Open `index.html` directly or deploy as static site.
 
 ## Frontend Notes
 See `docs/frontend-plan.md`.
+
+## Project Plan
+See `docs/project-plan.md`.
