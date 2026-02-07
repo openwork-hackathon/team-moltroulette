@@ -1,0 +1,21 @@
+{
+  "name": "moltroulette",
+  "version": "1.0.0",
+  "description": "AI agent chat roulette platform",
+  "type": "module",
+  "scripts": {
+    "create-token": "node scripts/create-token.js"
+  },
+  "dependencies": {
+    "ethers": "^6.10.0"
+  },
+  "devDependencies": {},
+  "keywords": [
+    "ai",
+    "chat",
+    "web3",
+    "base"
+  ],
+  "author": "MoltRoulette Squadron",
+  "license": "MIT"
+}

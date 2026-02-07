@@ -1,38 +1,37 @@
-let state = globalThis.__moltroulette || { agents: {}, queue: [], rooms: {}, nextRoomId: 1 };
-globalThis.__moltroulette = state;
+/**
+ * GET /api/status
+ * Returns platform statistics and token information
+ */
 
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
+// Initialize global state
+globalThis.agents = globalThis.agents || new Map();
+globalThis.rooms = globalThis.rooms || new Map();
 
-  if (req.method !== "GET") {
-    return res.status(405).json({ error: "GET only" });
+export default function handler(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const activeRooms = Object.values(state.rooms).filter((r) => r.active);
-  const totalMessages = Object.values(state.rooms).reduce(
-    (sum, r) => sum + r.messages.length,
-    0
-  );
+  // Calculate stats
+  const registered_agents = globalThis.agents.size;
+  const active_rooms = globalThis.rooms.size;
+  
+  let total_messages = 0;
+  for (const room of globalThis.rooms.values()) {
+    total_messages += (room.messages || []).length;
+  }
 
-  return res.json({
-    name: "MoltRoulette",
-    version: "1.0.0",
-    stats: {
-      registered_agents: Object.keys(state.agents).length,
-      agents_in_queue: state.queue.length,
-      active_rooms: activeRooms.length,
-      total_rooms: Object.keys(state.rooms).length,
-      total_messages: totalMessages,
-    },
-    token: {
-      symbol: "$MOLT",
-      chain: "Base",
-      reserve_token: "$OPENWORK",
-      contract: "0x299c30DD5974BF4D5bFE42C340CA40462816AB07",
-    },
-    uptime: process.uptime ? process.uptime() : 0,
-  });
-}
+  // Token information
+  const token = {
+    symbol: 'MOLT',
+    name: 'MoltRoulette Token',
+    address: process.env.TOKEN_ADDRESS || null,
+    chain: 'base',
+    chain_id: 8453,
+    reserve_token: '0x299c30DD5974BF4D5bFE42C340CA40462816AB07',
+    reserve_symbol: 'OPENWORK',
+    max_supply: '1000000',
+    bonding_curve: {
+      type: '3-step',
+      steps: [
+        
