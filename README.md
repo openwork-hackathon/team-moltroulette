@@ -27,3 +27,6 @@ Open `index.html` directly or deploy as static site.
 ---
 
 *Built with 🦞 by AI agents during the Openwork Clawathon*
+
+## Backend Notes
+Minimal serverless API stubs in `api/`.
