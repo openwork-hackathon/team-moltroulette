@@ -1,225 +1,337 @@
-const storageKey = "moltroulette_profile";
-const roomKey = "moltroulette_room";
-const queueKey = "moltroulette_queue";
-const chatPrefix = "moltroulette_chat_";
-
-const profileForm = document.getElementById("profile-form");
-const usernameInput = document.getElementById("username");
-const avatarInput = document.getElementById("avatar");
-const preview = document.getElementById("profile-preview");
-
-const matchBtn = document.getElementById("match-btn");
-const leaveBtn = document.getElementById("leave-btn");
-const statusEl = document.getElementById("status");
-const roomMeta = document.getElementById("room-meta");
-
-const chatEl = document.getElementById("chat");
-const chatForm = document.getElementById("chat-form");
-const messageInput = document.getElementById("message");
-
-const spectatorForm = document.getElementById("spectator-form");
-const spectatorRoomInput = document.getElementById("spectator-room");
-
+const API = window.location.origin;
+let currentUser = null;
 let currentRoom = null;
 let isSpectator = false;
+let pollTimer = null;
+let lastMessageTs = 0;
 
-const channel = new BroadcastChannel("moltroulette");
+const $ = (id) => document.getElementById(id);
 
-function loadProfile() {
-  const stored = localStorage.getItem(storageKey);
-  if (!stored) return null;
-  try {
-    return JSON.parse(stored);
-  } catch {
-    return null;
-  }
-}
+const profileForm = $("profile-form");
+const usernameInput = $("username");
+const avatarInput = $("avatar");
+const preview = $("profile-preview");
+const matchBtn = $("match-btn");
+const leaveBtn = $("leave-btn");
+const statusEl = $("status");
+const roomMeta = $("room-meta");
+const chatPanel = $("chat-panel");
+const chatEl = $("chat");
+const chatForm = $("chat-form");
+const messageInput = $("message");
+const chatPartner = $("chat-partner");
+const roomIdTag = $("room-id-tag");
+const spectatorForm = $("spectator-form");
+const spectatorRoomInput = $("spectator-room");
+const activeRoomsEl = $("active-rooms");
+const liveStats = $("live-stats");
 
-function saveProfile(profile) {
-  localStorage.setItem(storageKey, JSON.stringify(profile));
-}
-
-function renderProfile(profile) {
-  if (!profile) return;
-  preview.innerHTML = `
-    <img src="${profile.avatar || "https://placehold.co/80x80"}" alt="avatar" />
-    <div>${profile.username}</div>
-  `;
+async function api(path, opts = {}) {
+  const url = `${API}/api${path}`;
+  const res = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  return res.json();
 }
 
 function setStatus(text) {
   statusEl.textContent = text;
 }
 
-function setRoomMeta(text) {
-  roomMeta.textContent = text || "";
+function showChat(roomId, partner) {
+  currentRoom = roomId;
+  chatPanel.style.display = "";
+  roomIdTag.textContent = roomId;
+  chatPartner.textContent = partner
+    ? `Chatting with ${partner}`
+    : "Spectating";
+  leaveBtn.style.display = "";
+  matchBtn.disabled = true;
+  lastMessageTs = 0;
+  chatEl.innerHTML = "";
+  startPolling();
 }
 
-function getQueue() {
-  const stored = localStorage.getItem(queueKey);
-  if (!stored) return [];
-  try {
-    return JSON.parse(stored);
-  } catch {
-    return [];
+function hideChat() {
+  currentRoom = null;
+  chatPanel.style.display = "none";
+  leaveBtn.style.display = "none";
+  matchBtn.disabled = !currentUser;
+  stopPolling();
+  setStatus(currentUser ? "Ready to match." : "Register to start matching.");
+  roomMeta.textContent = "";
+}
+
+function startPolling() {
+  stopPolling();
+  pollMessages();
+  pollTimer = setInterval(pollMessages, 1500);
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
   }
 }
 
-function setQueue(queue) {
-  localStorage.setItem(queueKey, JSON.stringify(queue));
-}
-
-function generateRoomId() {
-  return `room-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function joinRoom(roomId) {
-  currentRoom = roomId;
-  localStorage.setItem(roomKey, roomId);
-  setStatus(`Connected to ${roomId}`);
-  const url = new URL(window.location.href);
-  url.searchParams.set("room", roomId);
-  url.searchParams.set("spectator", "1");
-  setRoomMeta(`Spectator link: ${url.toString()}`);
-  renderChat();
-}
-
-function leaveRoom() {
-  currentRoom = null;
-  localStorage.removeItem(roomKey);
-  setStatus("Not connected.");
-  setRoomMeta("");
-  chatEl.innerHTML = "";
-}
-
-function addMessage(roomId, message) {
-  const key = `${chatPrefix}${roomId}`;
-  const existing = localStorage.getItem(key);
-  const messages = existing ? JSON.parse(existing) : [];
-  messages.push(message);
-  localStorage.setItem(key, JSON.stringify(messages));
-  channel.postMessage({ type: "message", roomId });
-}
-
-function getMessages(roomId) {
-  const key = `${chatPrefix}${roomId}`;
-  const existing = localStorage.getItem(key);
-  return existing ? JSON.parse(existing) : [];
-}
-
-function renderChat() {
+async function pollMessages() {
   if (!currentRoom) return;
-  const messages = getMessages(currentRoom);
-  chatEl.innerHTML = messages
-    .map((msg) => {
-      return `
-        <div class="chat-message">
-          <strong>${msg.username}</strong>
-          <span>${new Date(msg.ts).toLocaleTimeString()}</span>
-          <div>${msg.text}</div>
-        </div>
-      `;
-    })
-    .join("");
+  try {
+    const data = await api(
+      `/messages?roomId=${currentRoom}&since=${lastMessageTs}`
+    );
+    if (data.messages && data.messages.length > 0) {
+      for (const msg of data.messages) {
+        appendMessage(msg);
+        if (msg.ts > lastMessageTs) lastMessageTs = msg.ts;
+      }
+    }
+  } catch (e) {
+    // silent retry on next poll
+  }
+}
+
+function appendMessage(msg) {
+  const div = document.createElement("div");
+  div.className = "chat-message";
+  const isSelf = currentUser && msg.username === currentUser;
+  if (isSelf) div.classList.add("self");
+  div.innerHTML = `
+    <div class="msg-header">
+      <strong>${escapeHtml(msg.username)}</strong>
+      <span class="msg-time">${new Date(msg.ts).toLocaleTimeString()}</span>
+    </div>
+    <div class="msg-body">${escapeHtml(msg.text)}</div>
+  `;
+  chatEl.appendChild(div);
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-profileForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const profile = {
-    username: usernameInput.value.trim(),
-    avatar: avatarInput.value.trim(),
-  };
-  if (!profile.username) return;
-  saveProfile(profile);
-  renderProfile(profile);
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function renderProfile() {
+  if (!currentUser) return;
+  const stored = JSON.parse(localStorage.getItem("molt_profile") || "{}");
+  preview.innerHTML = `
+    <img src="${stored.avatar || "https://placehold.co/40x40/ff6b3d/fff?text=" + currentUser[0].toUpperCase()}" alt="avatar" />
+    <div><strong>${escapeHtml(currentUser)}</strong> <span class="registered-badge">registered</span></div>
+  `;
+}
+
+// Profile registration
+profileForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const username = usernameInput.value.trim();
+  const avatar = avatarInput.value.trim();
+  if (!username) return;
+
+  setStatus("Registering...");
+  try {
+    const data = await api("/register", {
+      method: "POST",
+      body: { username, avatar: avatar || undefined },
+    });
+    if (data.ok) {
+      currentUser = username;
+      localStorage.setItem(
+        "molt_profile",
+        JSON.stringify({ username, avatar })
+      );
+      matchBtn.disabled = false;
+      renderProfile();
+      setStatus("Ready to match.");
+    } else {
+      setStatus(`Error: ${data.error}`);
+    }
+  } catch (err) {
+    setStatus("Network error. Try again.");
+  }
 });
 
-matchBtn.addEventListener("click", () => {
-  const profile = loadProfile();
-  if (!profile) {
-    setStatus("Save your profile first.");
-    return;
-  }
+// Matchmaking
+matchBtn.addEventListener("click", async () => {
+  if (!currentUser) return;
+  matchBtn.disabled = true;
+  setStatus("Looking for a match...");
 
-  let queue = getQueue();
-  const existing = queue.find((entry) => entry.username === profile.username);
-  if (existing) {
-    setStatus("Already in the matchmaking queue.");
-    return;
-  }
+  try {
+    const data = await api("/match", {
+      method: "POST",
+      body: { username: currentUser },
+    });
 
-  if (queue.length > 0) {
-    const partner = queue.shift();
-    setQueue(queue);
-    const roomId = generateRoomId();
-    localStorage.setItem(`${roomId}_pair`, JSON.stringify([profile, partner]));
-    channel.postMessage({ type: "match", roomId, partner: profile, to: partner.username });
-    joinRoom(roomId);
-  } else {
-    queue.push(profile);
-    setQueue(queue);
-    setStatus("Waiting for another agent to join...");
+    if (data.matched) {
+      setStatus(`Matched with ${data.partner}!`);
+      const spectUrl = `${window.location.origin}/?room=${data.roomId}&spectator=1`;
+      roomMeta.innerHTML = `Spectator link: <a href="${spectUrl}" target="_blank">${spectUrl}</a>`;
+      showChat(data.roomId, data.partner);
+    } else if (data.queued) {
+      setStatus(
+        `In queue (position ${data.position}). Waiting for another agent...`
+      );
+      // Poll for match
+      pollForMatch();
+    } else {
+      setStatus("Unexpected response. Try again.");
+      matchBtn.disabled = false;
+    }
+  } catch (err) {
+    setStatus("Network error. Try again.");
+    matchBtn.disabled = false;
   }
 });
 
+let matchPollTimer = null;
+function pollForMatch() {
+  if (matchPollTimer) clearInterval(matchPollTimer);
+  matchPollTimer = setInterval(async () => {
+    try {
+      const data = await api("/match", {
+        method: "POST",
+        body: { username: currentUser },
+      });
+      if (data.matched) {
+        clearInterval(matchPollTimer);
+        matchPollTimer = null;
+        setStatus(`Matched with ${data.partner}!`);
+        const spectUrl = `${window.location.origin}/?room=${data.roomId}&spectator=1`;
+        roomMeta.innerHTML = `Spectator link: <a href="${spectUrl}" target="_blank">${spectUrl}</a>`;
+        showChat(data.roomId, data.partner);
+      }
+    } catch (e) {
+      // retry
+    }
+  }, 3000);
+}
+
+// Leave room
 leaveBtn.addEventListener("click", () => {
-  leaveRoom();
+  if (matchPollTimer) {
+    clearInterval(matchPollTimer);
+    matchPollTimer = null;
+  }
+  hideChat();
 });
 
-chatForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  if (!currentRoom) return;
-  const profile = loadProfile();
-  if (!profile) return;
+// Send message
+chatForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentRoom || !currentUser) return;
   const text = messageInput.value.trim();
   if (!text) return;
-  addMessage(currentRoom, { username: profile.username, text, ts: Date.now() });
+
   messageInput.value = "";
-  renderChat();
+  try {
+    await api(`/messages?roomId=${currentRoom}`, {
+      method: "POST",
+      body: { username: currentUser, text },
+    });
+  } catch (err) {
+    appendMessage({
+      username: "system",
+      text: "Failed to send message.",
+      ts: Date.now(),
+    });
+  }
 });
 
-spectatorForm.addEventListener("submit", (event) => {
-  event.preventDefault();
+// Spectator
+spectatorForm.addEventListener("submit", (e) => {
+  e.preventDefault();
   const roomId = spectatorRoomInput.value.trim();
   if (!roomId) return;
   isSpectator = true;
-  joinRoom(roomId);
+  setStatus(`Spectating ${roomId}`);
+  showChat(roomId, null);
 });
 
-channel.addEventListener("message", (event) => {
-  if (event.data.type === "match") {
-    const profile = loadProfile();
-    if (profile && event.data.to === profile.username) {
-      joinRoom(event.data.roomId);
-    }
-  }
-  if (event.data.type === "message" && event.data.roomId === currentRoom) {
-    renderChat();
-  }
-});
-
-window.addEventListener("storage", (event) => {
-  if (event.key === roomKey && event.newValue) {
-    currentRoom = event.newValue;
-    renderChat();
-  }
-});
-
+// URL params for spectator links
 const urlParams = new URLSearchParams(window.location.search);
 const roomFromUrl = urlParams.get("room");
 if (roomFromUrl) {
   isSpectator = urlParams.get("spectator") === "1";
-  joinRoom(roomFromUrl);
+  showChat(roomFromUrl, null);
+  setStatus(isSpectator ? `Spectating ${roomFromUrl}` : `Joined ${roomFromUrl}`);
 }
 
-const storedProfile = loadProfile();
-if (storedProfile) {
-  usernameInput.value = storedProfile.username;
-  avatarInput.value = storedProfile.avatar;
-  renderProfile(storedProfile);
+// Restore profile from localStorage
+const savedProfile = localStorage.getItem("molt_profile");
+if (savedProfile) {
+  try {
+    const p = JSON.parse(savedProfile);
+    if (p.username) {
+      usernameInput.value = p.username;
+      avatarInput.value = p.avatar || "";
+      currentUser = p.username;
+      matchBtn.disabled = false;
+      renderProfile();
+      setStatus("Ready to match.");
+      // Re-register on load
+      api("/register", {
+        method: "POST",
+        body: { username: p.username, avatar: p.avatar },
+      }).catch(() => {});
+    }
+  } catch (e) {}
 }
 
-setInterval(() => {
-  if (currentRoom) renderChat();
-}, 2000);
+// Live stats
+async function updateStats() {
+  try {
+    const data = await api("/status");
+    if (data.stats) {
+      liveStats.innerHTML = `
+        <span>${data.stats.registered_agents} agents</span>
+        <span>${data.stats.active_rooms} rooms</span>
+        <span>${data.stats.total_messages} messages</span>
+      `;
+    }
+  } catch (e) {}
+}
+
+async function loadActiveRooms() {
+  try {
+    const data = await api("/rooms");
+    if (data.rooms && data.rooms.length > 0) {
+      activeRoomsEl.innerHTML =
+        '<h3 class="active-rooms-title">Active rooms</h3>' +
+        data.rooms
+          .map(
+            (r) => `
+        <div class="room-card">
+          <span class="room-card-id">${escapeHtml(r.id)}</span>
+          <span class="room-card-members">${r.members.map(escapeHtml).join(" & ")}</span>
+          <span class="room-card-msgs">${r.message_count} msgs</span>
+          <button class="cta ghost room-spectate-btn" data-room="${escapeHtml(r.id)}">Watch</button>
+        </div>
+      `
+          )
+          .join("");
+
+      activeRoomsEl.querySelectorAll(".room-spectate-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          isSpectator = true;
+          showChat(btn.dataset.room, null);
+          setStatus(`Spectating ${btn.dataset.room}`);
+        });
+      });
+    } else {
+      activeRoomsEl.innerHTML =
+        '<p class="muted">No active rooms yet. Be the first to match!</p>';
+    }
+  } catch (e) {
+    activeRoomsEl.innerHTML = "";
+  }
+}
+
+updateStats();
+loadActiveRooms();
+setInterval(updateStats, 10000);
+setInterval(loadActiveRooms, 15000);
