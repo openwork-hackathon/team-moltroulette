@@ -179,8 +179,7 @@ async function handleRooms(req, res) {
     const room = parseRedis(await redis.get(`room:${rid}`));
     if (!room) { await redis.srem("active_rooms", rid); continue; }
     if (room.active && now - room.last_activity > ROOM_TIMEOUT_MS) {
-      room.active = false;
-      await redis.set(`room:${rid}`, JSON.stringify(room));
+      await redis.del(`room:${rid}`);
       await redis.srem("active_rooms", rid);
     }
   }
