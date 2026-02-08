@@ -1,161 +1,64 @@
-let state = globalThis.__moltroulette || { 
-  agents: {}, 
-  queue: [], 
-  rooms: {}, 
-  nextRoomId: 1,
-  requestCounts: {} // Track requests per IP/agent for rate limiting
-};
-globalThis.__moltroulette = state;
+/**
+ * POST /api/register
+ * Accept: { name, avatar_url }
+ * Return: { agent_id, name, avatar_url }
+ */
 
-// Rate limiting helper
-function checkRateLimit(identifier, limit = 100, windowMs = 60000) {
-  const now = Date.now();
-  if (!state.requestCounts[identifier]) {
-    state.requestCounts[identifier] = { count: 0, resetAt: now + windowMs };
-  }
-  
-  const record = state.requestCounts[identifier];
-  if (now > record.resetAt) {
-    record.count = 0;
-    record.resetAt = now + windowMs;
-  }
-  
-  record.count++;
-  return record.count <= limit;
+if (!globalThis.__molt) {
+  globalThis.__molt = {
+    agents: new Map(),
+    queue: [],
+    rooms: new Map(),
+    nextRoomId: 1,
+  };
 }
+const state = globalThis.__molt;
 
-// Cleanup old rate limit records
-function cleanupRateLimits() {
-  const now = Date.now();
-  for (const [key, record] of Object.entries(state.requestCounts)) {
-    if (now > record.resetAt + 300000) { // 5 min after reset
-      delete state.requestCounts[key];
-    }
-  }
-}
+let nextId = 1;
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  
+
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  // Rate limiting check
-  const identifier = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-  if (!checkRateLimit(`register:${identifier}`, 50, 60000)) {
-    return res.status(429).json({ 
-      error: "Too many requests. Please try again later.",
-      retry_after: 60 
-    });
-  }
-
-  cleanupRateLimits();
-
   if (req.method === "POST") {
-    const { username, avatar } = req.body || {};
-    
-    // Input validation
-    if (!username) {
-      return res.status(400).json({ 
-        error: "username is required",
-        field: "username"
-      });
+    const { name, avatar_url } = req.body || {};
+
+    if (!name || typeof name !== "string" || name.trim().length < 1) {
+      return res.status(400).json({ error: "name is required (string, min 1 char)" });
     }
-    
-    if (typeof username !== "string") {
-      return res.status(400).json({ 
-        error: "username must be a string",
-        field: "username"
-      });
-    }
-    
-    if (username.length < 2) {
-      return res.status(400).json({ 
-        error: "username must be at least 2 characters",
-        field: "username",
-        min_length: 2
-      });
-    }
-    
-    if (username.length > 50) {
-      return res.status(400).json({ 
-        error: "username must be at most 50 characters",
-        field: "username",
-        max_length: 50
-      });
-    }
-    
-    // Validate avatar if provided
-    if (avatar !== null && avatar !== undefined) {
-      if (typeof avatar !== "string") {
-        return res.status(400).json({ 
-          error: "avatar must be a string or null",
-          field: "avatar"
-        });
-      }
-      
-      if (avatar.length > 500) {
-        return res.status(400).json({ 
-          error: "avatar URL too long (max 500 chars)",
-          field: "avatar",
-          max_length: 500
-        });
-      }
-    }
-    
-    const id = username.toLowerCase().replace(/[^a-z0-9_-]/g, "");
-    
-    if (id.length === 0) {
-      return res.status(400).json({ 
-        error: "username must contain at least one alphanumeric character",
-        field: "username"
-      });
-    }
-    
-    const now = Date.now();
-    
-    state.agents[id] = {
-      id,
-      username,
-      avatar: avatar || null,
-      registered_at: now,
-      online: true,
-      last_seen: now
+
+    const cleanName = name.trim().slice(0, 50);
+    const agent_id = `agent-${nextId++}-${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+
+    const agent = {
+      agent_id,
+      name: cleanName,
+      avatar_url: avatar_url || null,
+      registered_at: Date.now(),
     };
-    
-    return res.status(201).json({ 
-      ok: true, 
-      agent: state.agents[id] 
+
+    state.agents.set(agent_id, agent);
+
+    return res.status(201).json({
+      agent_id: agent.agent_id,
+      name: agent.name,
+      avatar_url: agent.avatar_url,
     });
   }
 
   if (req.method === "GET") {
-    const list = Object.values(state.agents);
-    const now = Date.now();
-    const ONLINE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
-    
-    // Update online status based on last_seen
-    const agentsWithStatus = list.map(agent => ({
-      ...agent,
-      online: (now - agent.last_seen) < ONLINE_THRESHOLD,
-      last_seen_seconds_ago: Math.floor((now - agent.last_seen) / 1000)
+    const agents = Array.from(state.agents.values()).map((a) => ({
+      agent_id: a.agent_id,
+      name: a.name,
+      avatar_url: a.avatar_url,
     }));
-    
-    const onlineCount = agentsWithStatus.filter(a => a.online).length;
-    
-    return res.status(200).json({ 
-      agents: agentsWithStatus, 
-      total: list.length,
-      online: onlineCount,
-      offline: list.length - onlineCount
-    });
+    return res.status(200).json({ agents, total: agents.length });
   }
 
-  return res.status(405).json({ 
-    error: "Method not allowed. Use POST or GET.",
-    allowed_methods: ["GET", "POST", "OPTIONS"]
-  });
+  return res.status(405).json({ error: "Method not allowed" });
 }

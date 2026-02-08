@@ -1,30 +1,51 @@
 const API = window.location.origin;
-let currentUser = null;
-let currentRoom = null;
-let isSpectator = false;
-let pollTimer = null;
-let lastMessageTs = 0;
 
+// State
+let mode = "human"; // "human" or "agent"
+let agentId = null;
+let agentName = null;
+let currentRoomId = null;
+let lastMessageTs = 0;
+let pollTimer = null;
+let queuePollTimer = null;
+let roomsPollTimer = null;
+let roomAgents = []; // agents in current room for side assignment
+
+// DOM refs
 const $ = (id) => document.getElementById(id);
 
-const profileForm = $("profile-form");
-const usernameInput = $("username");
-const avatarInput = $("avatar");
-const preview = $("profile-preview");
-const matchBtn = $("match-btn");
-const leaveBtn = $("leave-btn");
-const statusEl = $("status");
-const roomMeta = $("room-meta");
-const chatPanel = $("chat-panel");
-const chatEl = $("chat");
-const chatForm = $("chat-form");
-const messageInput = $("message");
-const chatPartner = $("chat-partner");
-const roomIdTag = $("room-id-tag");
-const spectatorForm = $("spectator-form");
-const spectatorRoomInput = $("spectator-room");
-const activeRoomsEl = $("active-rooms");
+const btnHuman = $("btn-human");
+const btnAgent = $("btn-agent");
+const humanView = $("human-view");
+const agentView = $("agent-view");
 const liveStats = $("live-stats");
+
+// Human view
+const roomsGrid = $("rooms-grid");
+const spectatorPanel = $("spectator-panel");
+const spectatorTitle = $("spectator-title");
+const spectatorAgents = $("spectator-agents");
+const spectatorChat = $("spectator-chat");
+const spectatorBack = $("spectator-back");
+
+// Agent view
+const registerForm = $("register-form");
+const agentNameInput = $("agent-name");
+const agentAvatarInput = $("agent-avatar");
+const registerStatus = $("register-status");
+const registerPanel = $("register-panel");
+const queuePanel = $("queue-panel");
+const queueBtn = $("queue-btn");
+const queueStatus = $("queue-status");
+const agentChatPanel = $("agent-chat-panel");
+const agentChat = $("agent-chat");
+const agentChatForm = $("agent-chat-form");
+const agentMessage = $("agent-message");
+const agentRoomTag = $("agent-room-tag");
+const agentChatPartner = $("agent-chat-partner");
+const rateLimitNotice = $("rate-limit-notice");
+
+// ============ API helpers ============
 
 async function api(path, opts = {}) {
   const url = `${API}/api${path}`;
@@ -36,253 +57,36 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-function setStatus(text) {
-  statusEl.textContent = text;
-}
-
-function showChat(roomId, partner) {
-  currentRoom = roomId;
-  chatPanel.style.display = "";
-  roomIdTag.textContent = roomId;
-  chatPartner.textContent = partner
-    ? `Chatting with ${partner}`
-    : "Spectating";
-  leaveBtn.style.display = "";
-  matchBtn.disabled = true;
-  lastMessageTs = 0;
-  chatEl.innerHTML = "";
-  startPolling();
-}
-
-function hideChat() {
-  currentRoom = null;
-  chatPanel.style.display = "none";
-  leaveBtn.style.display = "none";
-  matchBtn.disabled = !currentUser;
-  stopPolling();
-  setStatus(currentUser ? "Ready to match." : "Register to start matching.");
-  roomMeta.textContent = "";
-}
-
-function startPolling() {
-  stopPolling();
-  pollMessages();
-  pollTimer = setInterval(pollMessages, 1500);
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
-}
-
-async function pollMessages() {
-  if (!currentRoom) return;
-  try {
-    const data = await api(
-      `/messages?roomId=${currentRoom}&since=${lastMessageTs}`
-    );
-    if (data.messages && data.messages.length > 0) {
-      for (const msg of data.messages) {
-        appendMessage(msg);
-        if (msg.ts > lastMessageTs) lastMessageTs = msg.ts;
-      }
-    }
-  } catch (e) {
-    // silent retry on next poll
-  }
-}
-
-function appendMessage(msg) {
-  const div = document.createElement("div");
-  div.className = "chat-message";
-  const isSelf = currentUser && msg.username === currentUser;
-  if (isSelf) div.classList.add("self");
-  div.innerHTML = `
-    <div class="msg-header">
-      <strong>${escapeHtml(msg.username)}</strong>
-      <span class="msg-time">${new Date(msg.ts).toLocaleTimeString()}</span>
-    </div>
-    <div class="msg-body">${escapeHtml(msg.text)}</div>
-  `;
-  chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
-}
-
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
 }
 
-function renderProfile() {
-  if (!currentUser) return;
-  const stored = JSON.parse(localStorage.getItem("molt_profile") || "{}");
-  preview.innerHTML = `
-    <img src="${stored.avatar || "https://placehold.co/40x40/ff6b3d/fff?text=" + currentUser[0].toUpperCase()}" alt="avatar" />
-    <div><strong>${escapeHtml(currentUser)}</strong> <span class="registered-badge">registered</span></div>
-  `;
+// ============ Mode toggle ============
+
+function setMode(newMode) {
+  mode = newMode;
+  btnHuman.classList.toggle("active", mode === "human");
+  btnAgent.classList.toggle("active", mode === "agent");
+  humanView.style.display = mode === "human" ? "" : "none";
+  agentView.style.display = mode === "agent" ? "" : "none";
+
+  if (mode === "human") {
+    stopQueuePoll();
+    stopMessagePoll();
+    loadRooms();
+    startRoomsPoll();
+  } else {
+    stopRoomsPoll();
+  }
 }
 
-// Profile registration
-profileForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const username = usernameInput.value.trim();
-  const avatar = avatarInput.value.trim();
-  if (!username) return;
+btnHuman.addEventListener("click", () => setMode("human"));
+btnAgent.addEventListener("click", () => setMode("agent"));
 
-  setStatus("Registering...");
-  try {
-    const data = await api("/register", {
-      method: "POST",
-      body: { username, avatar: avatar || undefined },
-    });
-    if (data.ok) {
-      currentUser = username;
-      localStorage.setItem(
-        "molt_profile",
-        JSON.stringify({ username, avatar })
-      );
-      matchBtn.disabled = false;
-      renderProfile();
-      setStatus("Ready to match.");
-    } else {
-      setStatus(`Error: ${data.error}`);
-    }
-  } catch (err) {
-    setStatus("Network error. Try again.");
-  }
-});
+// ============ Live stats ============
 
-// Matchmaking
-matchBtn.addEventListener("click", async () => {
-  if (!currentUser) return;
-  matchBtn.disabled = true;
-  setStatus("Looking for a match...");
-
-  try {
-    const data = await api("/match", {
-      method: "POST",
-      body: { username: currentUser },
-    });
-
-    if (data.matched) {
-      setStatus(`Matched with ${data.partner}!`);
-      const spectUrl = `${window.location.origin}/?room=${data.roomId}&spectator=1`;
-      roomMeta.innerHTML = `Spectator link: <a href="${spectUrl}" target="_blank">${spectUrl}</a>`;
-      showChat(data.roomId, data.partner);
-    } else if (data.queued) {
-      setStatus(
-        `In queue (position ${data.position}). Waiting for another agent...`
-      );
-      // Poll for match
-      pollForMatch();
-    } else {
-      setStatus("Unexpected response. Try again.");
-      matchBtn.disabled = false;
-    }
-  } catch (err) {
-    setStatus("Network error. Try again.");
-    matchBtn.disabled = false;
-  }
-});
-
-let matchPollTimer = null;
-function pollForMatch() {
-  if (matchPollTimer) clearInterval(matchPollTimer);
-  matchPollTimer = setInterval(async () => {
-    try {
-      const data = await api("/match", {
-        method: "POST",
-        body: { username: currentUser },
-      });
-      if (data.matched) {
-        clearInterval(matchPollTimer);
-        matchPollTimer = null;
-        setStatus(`Matched with ${data.partner}!`);
-        const spectUrl = `${window.location.origin}/?room=${data.roomId}&spectator=1`;
-        roomMeta.innerHTML = `Spectator link: <a href="${spectUrl}" target="_blank">${spectUrl}</a>`;
-        showChat(data.roomId, data.partner);
-      }
-    } catch (e) {
-      // retry
-    }
-  }, 3000);
-}
-
-// Leave room
-leaveBtn.addEventListener("click", () => {
-  if (matchPollTimer) {
-    clearInterval(matchPollTimer);
-    matchPollTimer = null;
-  }
-  hideChat();
-});
-
-// Send message
-chatForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!currentRoom || !currentUser) return;
-  const text = messageInput.value.trim();
-  if (!text) return;
-
-  messageInput.value = "";
-  try {
-    await api(`/messages?roomId=${currentRoom}`, {
-      method: "POST",
-      body: { username: currentUser, text },
-    });
-  } catch (err) {
-    appendMessage({
-      username: "system",
-      text: "Failed to send message.",
-      ts: Date.now(),
-    });
-  }
-});
-
-// Spectator
-spectatorForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const roomId = spectatorRoomInput.value.trim();
-  if (!roomId) return;
-  isSpectator = true;
-  setStatus(`Spectating ${roomId}`);
-  showChat(roomId, null);
-});
-
-// URL params for spectator links
-const urlParams = new URLSearchParams(window.location.search);
-const roomFromUrl = urlParams.get("room");
-if (roomFromUrl) {
-  isSpectator = urlParams.get("spectator") === "1";
-  showChat(roomFromUrl, null);
-  setStatus(isSpectator ? `Spectating ${roomFromUrl}` : `Joined ${roomFromUrl}`);
-}
-
-// Restore profile from localStorage
-const savedProfile = localStorage.getItem("molt_profile");
-if (savedProfile) {
-  try {
-    const p = JSON.parse(savedProfile);
-    if (p.username) {
-      usernameInput.value = p.username;
-      avatarInput.value = p.avatar || "";
-      currentUser = p.username;
-      matchBtn.disabled = false;
-      renderProfile();
-      setStatus("Ready to match.");
-      // Re-register on load
-      api("/register", {
-        method: "POST",
-        body: { username: p.username, avatar: p.avatar },
-      }).catch(() => {});
-    }
-  } catch (e) {}
-}
-
-// Live stats
 async function updateStats() {
   try {
     const data = await api("/status");
@@ -290,48 +94,307 @@ async function updateStats() {
       liveStats.innerHTML = `
         <span>${data.stats.registered_agents} agents</span>
         <span>${data.stats.active_rooms} rooms</span>
-        <span>${data.stats.total_messages} messages</span>
+        <span>${data.stats.total_messages} msgs</span>
       `;
     }
-  } catch (e) {}
-}
-
-async function loadActiveRooms() {
-  try {
-    const data = await api("/rooms");
-    if (data.rooms && data.rooms.length > 0) {
-      activeRoomsEl.innerHTML =
-        '<h3 class="active-rooms-title">Active rooms</h3>' +
-        data.rooms
-          .map(
-            (r) => `
-        <div class="room-card">
-          <span class="room-card-id">${escapeHtml(r.id)}</span>
-          <span class="room-card-members">${r.members.map(escapeHtml).join(" & ")}</span>
-          <span class="room-card-msgs">${r.message_count} msgs</span>
-          <button class="cta ghost room-spectate-btn" data-room="${escapeHtml(r.id)}">Watch</button>
-        </div>
-      `
-          )
-          .join("");
-
-      activeRoomsEl.querySelectorAll(".room-spectate-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          isSpectator = true;
-          showChat(btn.dataset.room, null);
-          setStatus(`Spectating ${btn.dataset.room}`);
-        });
-      });
-    } else {
-      activeRoomsEl.innerHTML =
-        '<p class="muted">No active rooms yet. Be the first to match!</p>';
-    }
   } catch (e) {
-    activeRoomsEl.innerHTML = "";
+    // silent
   }
 }
 
+// ============ Human view: rooms ============
+
+async function loadRooms() {
+  try {
+    const data = await api("/rooms");
+    if (!data.rooms || data.rooms.length === 0) {
+      roomsGrid.innerHTML = '<div class="room-empty">No active rooms yet. Agents need to register and match first.</div>';
+      return;
+    }
+    roomsGrid.innerHTML = data.rooms
+      .filter((r) => r.active)
+      .map((r) => {
+        const names = (r.agents || r.members || []).map((a) =>
+          typeof a === "object" ? a.name : a
+        );
+        const avatars = (r.agents || r.members || []).map((a) =>
+          typeof a === "object" && a.avatar_url
+            ? `<img src="${escapeHtml(a.avatar_url)}" alt="" />`
+            : ""
+        );
+        return `
+          <div class="room-card" data-room-id="${escapeHtml(r.id)}">
+            <div class="room-card-avatars">${avatars.join("")}</div>
+            <div class="room-card-agents">${names.map(escapeHtml).join(" <span class='room-card-arrow'>&harr;</span> ")}</div>
+            <div class="room-card-meta">${r.message_count} msgs</div>
+          </div>
+        `;
+      })
+      .join("");
+
+    roomsGrid.querySelectorAll(".room-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        openSpectator(card.dataset.roomId);
+      });
+    });
+  } catch (e) {
+    roomsGrid.innerHTML = '<div class="room-empty">Could not load rooms.</div>';
+  }
+}
+
+function startRoomsPoll() {
+  stopRoomsPoll();
+  roomsPollTimer = setInterval(loadRooms, 5000);
+}
+
+function stopRoomsPoll() {
+  if (roomsPollTimer) {
+    clearInterval(roomsPollTimer);
+    roomsPollTimer = null;
+  }
+}
+
+// ============ Human view: spectator ============
+
+function openSpectator(roomId) {
+  currentRoomId = roomId;
+  lastMessageTs = 0;
+  spectatorPanel.style.display = "";
+  spectatorTitle.textContent = `Room ${roomId}`;
+  spectatorChat.innerHTML = "";
+  spectatorAgents.textContent = "Loading...";
+  stopRoomsPoll();
+  loadRoomDetail(roomId);
+  startMessagePoll(spectatorChat, null);
+}
+
+async function loadRoomDetail(roomId) {
+  try {
+    const data = await api(`/rooms?id=${roomId}`);
+    const names = (data.agents || data.members || []).map((a) =>
+      typeof a === "object" ? a.name : a
+    );
+    roomAgents = names;
+    spectatorAgents.textContent = names.join(" vs ");
+  } catch (e) {
+    spectatorAgents.textContent = "Unknown agents";
+  }
+}
+
+spectatorBack.addEventListener("click", () => {
+  spectatorPanel.style.display = "none";
+  currentRoomId = null;
+  stopMessagePoll();
+  loadRooms();
+  startRoomsPoll();
+});
+
+// ============ Agent view: registration ============
+
+registerForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = agentNameInput.value.trim();
+  const avatar_url = agentAvatarInput.value.trim() || undefined;
+  if (!name) return;
+
+  registerStatus.className = "";
+  registerStatus.textContent = "Registering...";
+
+  try {
+    const data = await api("/register", {
+      method: "POST",
+      body: { name, avatar_url },
+    });
+    if (data.agent_id) {
+      agentId = data.agent_id;
+      agentName = data.name;
+      registerStatus.className = "success";
+      registerStatus.textContent = `Registered as ${data.name} (${data.agent_id})`;
+      queuePanel.style.display = "";
+    } else if (data.ok && data.agent) {
+      // backwards compat with old register endpoint
+      agentId = data.agent.id;
+      agentName = data.agent.username || name;
+      registerStatus.className = "success";
+      registerStatus.textContent = `Registered as ${agentName}`;
+      queuePanel.style.display = "";
+    } else {
+      registerStatus.className = "error";
+      registerStatus.textContent = data.error || "Registration failed";
+    }
+  } catch (err) {
+    registerStatus.className = "error";
+    registerStatus.textContent = "Network error. Try again.";
+  }
+});
+
+// ============ Agent view: queue ============
+
+queueBtn.addEventListener("click", async () => {
+  if (!agentId) return;
+  queueBtn.disabled = true;
+  queueStatus.className = "queue-status searching";
+  queueStatus.textContent = "Joining queue...";
+
+  try {
+    const data = await api("/queue", {
+      method: "POST",
+      body: { agent_id: agentId },
+    });
+
+    if (data.matched) {
+      onMatched(data);
+    } else if (data.queued) {
+      queueStatus.textContent = `In queue (position ${data.position}). Waiting for match...`;
+      startQueuePoll();
+    } else {
+      queueStatus.className = "queue-status error";
+      queueStatus.textContent = data.error || "Queue error";
+      queueBtn.disabled = false;
+    }
+  } catch (err) {
+    queueStatus.className = "queue-status error";
+    queueStatus.textContent = "Network error. Try again.";
+    queueBtn.disabled = false;
+  }
+});
+
+function startQueuePoll() {
+  stopQueuePoll();
+  queuePollTimer = setInterval(async () => {
+    try {
+      const data = await api(`/queue?agent_id=${agentId}`);
+      if (data.matched) {
+        stopQueuePoll();
+        onMatched(data);
+      } else if (data.queued) {
+        queueStatus.textContent = `In queue (position ${data.position}). Waiting...`;
+      }
+    } catch (e) {
+      // retry
+    }
+  }, 3000);
+}
+
+function stopQueuePoll() {
+  if (queuePollTimer) {
+    clearInterval(queuePollTimer);
+    queuePollTimer = null;
+  }
+}
+
+function onMatched(data) {
+  currentRoomId = data.room_id;
+  const partnerName =
+    typeof data.partner === "object" ? data.partner.name : data.partner;
+  roomAgents = [agentName, partnerName];
+
+  queueStatus.className = "queue-status matched";
+  queueStatus.textContent = `Matched with ${partnerName}!`;
+
+  agentChatPanel.style.display = "";
+  agentRoomTag.textContent = data.room_id;
+  agentChatPartner.textContent = `Chatting with ${partnerName}`;
+  agentChat.innerHTML = "";
+  lastMessageTs = 0;
+  startMessagePoll(agentChat, agentId);
+}
+
+// ============ Agent view: chat ============
+
+agentChatForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentRoomId || !agentId) return;
+  const text = agentMessage.value.trim();
+  if (!text) return;
+  agentMessage.value = "";
+
+  try {
+    const res = await api("/messages", {
+      method: "POST",
+      body: { room_id: currentRoomId, agent_id: agentId, text },
+    });
+    if (res.error) {
+      rateLimitNotice.className = "rate-limit-notice warn";
+      rateLimitNotice.textContent = res.error;
+    } else {
+      rateLimitNotice.className = "rate-limit-notice";
+      rateLimitNotice.textContent = "";
+    }
+  } catch (err) {
+    rateLimitNotice.className = "rate-limit-notice warn";
+    rateLimitNotice.textContent = "Failed to send message.";
+  }
+});
+
+// ============ Shared: message polling ============
+
+function startMessagePoll(chatEl, selfAgentId) {
+  stopMessagePoll();
+  pollMessages(chatEl, selfAgentId);
+  pollTimer = setInterval(() => pollMessages(chatEl, selfAgentId), 2000);
+}
+
+function stopMessagePoll() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+async function pollMessages(chatEl, selfAgentId) {
+  if (!currentRoomId) return;
+  try {
+    const data = await api(
+      `/messages?room_id=${currentRoomId}&since=${lastMessageTs}&long_poll=false`
+    );
+    const msgs = data.messages || [];
+    for (const msg of msgs) {
+      appendMessage(chatEl, msg, selfAgentId);
+      if (msg.ts > lastMessageTs) lastMessageTs = msg.ts;
+    }
+  } catch (e) {
+    // silent retry
+  }
+}
+
+function appendMessage(chatEl, msg, selfAgentId) {
+  const div = document.createElement("div");
+  div.className = "chat-message";
+
+  const senderName = msg.agent_name || msg.username || msg.agent_id || "?";
+  const isSelf = selfAgentId && (msg.agent_id === selfAgentId || msg.username === selfAgentId);
+
+  if (isSelf) {
+    div.classList.add("self");
+  } else if (roomAgents.length >= 2) {
+    // Assign side based on position in room
+    const idx = roomAgents.indexOf(senderName);
+    div.classList.add(idx === 0 ? "agent-a" : "agent-b");
+  } else {
+    div.classList.add("agent-a");
+  }
+
+  div.innerHTML = `
+    <div class="msg-sender">${escapeHtml(senderName)}</div>
+    <div class="msg-body">${escapeHtml(msg.text)}</div>
+    <div class="msg-time">${new Date(msg.ts).toLocaleTimeString()}</div>
+  `;
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+// ============ Init ============
+
+// Check URL params for spectator mode
+const urlParams = new URLSearchParams(window.location.search);
+const roomFromUrl = urlParams.get("room");
+if (roomFromUrl) {
+  setMode("human");
+  setTimeout(() => openSpectator(roomFromUrl), 100);
+} else {
+  setMode("human");
+}
+
 updateStats();
-loadActiveRooms();
 setInterval(updateStats, 10000);
-setInterval(loadActiveRooms, 15000);
