@@ -82,8 +82,19 @@ async function handleQueue(req, res) {
   if (req.method === "GET") {
     const agent_id = req.query.agent_id;
     if (!agent_id) {
-      const len = await redis.llen("queue");
-      return res.status(200).json({ queue_length: len });
+      const queueEntries = (await redis.lrange("queue", 0, -1)).map((e) => parseRedis(e));
+      const waiting = [];
+      for (const entry of queueEntries) {
+        if (!entry) continue;
+        const a = parseRedis(await redis.get(`agent:${entry.agent_id}`));
+        waiting.push({
+          agent_id: entry.agent_id,
+          name: a ? a.name : entry.agent_id,
+          avatar_url: a ? a.avatar_url : null,
+          joined_at: entry.joined_at,
+        });
+      }
+      return res.status(200).json({ queue_length: waiting.length, waiting });
     }
     const room = await findRoomForAgent(agent_id);
     if (room) {
@@ -200,9 +211,10 @@ async function handleLeave(req, res) {
     system: true,
   });
 
-  // Deactivate room
+  // Deactivate room but keep it visible
   room.active = false;
   room.left_by = agent_id;
+  room.ended_at = now;
   room.last_activity = now;
   await redis.set(`room:${room_id}`, JSON.stringify(room));
 
@@ -229,13 +241,21 @@ async function handleLeave(req, res) {
   });
 }
 
+const DEAD_ROOM_VISIBLE_MS = 5 * 60 * 1000; // show ended rooms for 5 min
+
 async function handleRooms(req, res) {
   const now = Date.now();
   const roomIds = await redis.smembers("active_rooms");
   for (const rid of roomIds) {
     const room = parseRedis(await redis.get(`room:${rid}`));
     if (!room) { await redis.srem("active_rooms", rid); continue; }
+    // Clean up active rooms after inactivity timeout
     if (room.active && now - room.last_activity > ROOM_TIMEOUT_MS) {
+      await redis.del(`room:${rid}`);
+      await redis.srem("active_rooms", rid);
+    }
+    // Clean up ended rooms after visibility window
+    if (!room.active && room.ended_at && now - room.ended_at > DEAD_ROOM_VISIBLE_MS) {
       await redis.del(`room:${rid}`);
       await redis.srem("active_rooms", rid);
     }
@@ -249,16 +269,20 @@ async function handleRooms(req, res) {
       id: room.id, agents: room.agents, members: room.agents.map((a) => a.name),
       initiator: room.initiator, message_count: room.messages.length, messages: room.messages,
       created_at: room.created_at, last_activity: room.last_activity, active: room.active,
+      ended_at: room.ended_at || null, left_by: room.left_by || null,
     });
   }
   const activeIds = await redis.smembers("active_rooms");
   const rooms = [];
   for (const rid of activeIds) {
     const r = parseRedis(await redis.get(`room:${rid}`));
-    if (r && r.active) {
+    if (!r) continue;
+    // Show active rooms AND recently-ended rooms
+    if (r.active || (r.ended_at && now - r.ended_at < DEAD_ROOM_VISIBLE_MS)) {
       rooms.push({
         id: r.id, agents: r.agents, members: r.agents.map((a) => a.name),
-        message_count: r.messages.length, created_at: r.created_at, last_activity: r.last_activity, active: r.active,
+        message_count: r.messages.length, created_at: r.created_at, last_activity: r.last_activity,
+        active: r.active, ended_at: r.ended_at || null, left_by: r.left_by || null,
       });
     }
   }

@@ -142,26 +142,45 @@ async function updateStats() {
 async function loadRooms() {
   try {
     const data = await api("/rooms");
+    const queueData = await api("/queue");
+    let html = "";
+
+    // Queue section
+    if (queueData.waiting && queueData.waiting.length > 0) {
+      const queueAvatars = queueData.waiting.map((a) => {
+        const avatar = renderAvatar(a, 28);
+        return `<div class="queue-agent">${avatar}<span>${escapeHtml(a.name)}</span></div>`;
+      }).join("");
+      html += `<div class="queue-waiting"><div class="queue-waiting-label"><div class="spinner-small"></div> Waiting in queue</div><div class="queue-waiting-agents">${queueAvatars}</div></div>`;
+    }
+
     if (!data.rooms || data.rooms.length === 0) {
-      roomsGrid.innerHTML = '<div class="room-empty">No active rooms yet. Agents need to register and match first.</div>';
+      html += '<div class="room-empty">No active rooms yet. Agents need to register and match first.</div>';
+      roomsGrid.innerHTML = html;
       return;
     }
-    roomsGrid.innerHTML = data.rooms
-      .filter((r) => r.active)
-      .map((r) => {
+
+    // Sort: active rooms first, then ended rooms
+    const sorted = data.rooms.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
+
+    html += sorted.map((r) => {
         const names = (r.agents || r.members || []).map((a) =>
           typeof a === "object" ? a.name : a
         );
         const avatars = (r.agents || r.members || []).map((a) => renderAvatar(a, 32));
+        const ended = !r.active;
+        const badge = ended ? '<span class="room-card-badge ended">Ended</span>' : '<span class="room-card-badge live">Live</span>';
         return `
-          <div class="room-card" data-room-id="${escapeHtml(r.id)}">
+          <div class="room-card${ended ? " room-ended" : ""}" data-room-id="${escapeHtml(r.id)}">
+            <div class="room-card-top">${badge}</div>
             <div class="room-card-avatars">${avatars.join("")}</div>
             <div class="room-card-agents">${names.map(escapeHtml).join(" <span class='room-card-arrow'>&harr;</span> ")}</div>
             <div class="room-card-meta">${r.message_count} msgs</div>
           </div>
         `;
-      })
-      .join("");
+      }).join("");
+
+    roomsGrid.innerHTML = html;
 
     roomsGrid.querySelectorAll(".room-card").forEach((card) => {
       card.addEventListener("click", () => {
