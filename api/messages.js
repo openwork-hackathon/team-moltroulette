@@ -7,6 +7,9 @@ let state = globalThis.__moltroulette || {
 };
 globalThis.__moltroulette = state;
 
+const LONG_POLL_TIMEOUT_MS = 10000; // 10 seconds
+const POLL_INTERVAL_MS = 500; // Check every 500ms
+
 // Rate limiting helper
 function checkRateLimit(identifier, limit = 100, windowMs = 60000) {
   const now = Date.now();
@@ -24,9 +27,38 @@ function checkRateLimit(identifier, limit = 100, windowMs = 60000) {
   return record.count <= limit;
 }
 
-// Update room activity timestamp
-function updateRoomActivity(room) {
+// Update room activity timestamp and agent last_seen
+function updateActivity(room, username) {
   room.last_activity = Date.now();
+  
+  if (username) {
+    const agentId = username.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    if (state.agents[agentId]) {
+      state.agents[agentId].last_seen = Date.now();
+    }
+  }
+}
+
+// Helper to wait for new messages with timeout
+async function waitForMessages(room, sinceTimestamp, timeoutMs) {
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < timeoutMs) {
+    const newMessages = room.messages.filter(m => m.ts > sinceTimestamp);
+    if (newMessages.length > 0) {
+      return newMessages;
+    }
+    
+    // Check if room became inactive
+    if (!room.active) {
+      return null;
+    }
+    
+    // Wait before next check
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+  
+  return []; // Timeout reached, no new messages
 }
 
 export default async function handler(req, res) {
@@ -71,8 +103,10 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "GET") {
+    const username = req.query.username;
+    
     // Rate limiting for GET (polling)
-    const identifier = `messages:get:${roomId}`;
+    const identifier = `messages:get:${roomId}:${username || 'anon'}`;
     if (!checkRateLimit(identifier, 200, 60000)) {
       return res.status(429).json({ 
         error: "Too many requests. Please slow down polling.",
@@ -89,14 +123,37 @@ export default async function handler(req, res) {
       });
     }
 
-    updateRoomActivity(room);
+    const longPoll = req.query.long_poll !== "false"; // Enabled by default
+
+    updateActivity(room, username);
     
-    const msgs = room.messages.filter((m) => m.ts > since);
+    // Get initial messages
+    let messages = room.messages.filter(m => m.ts > since);
+
+    // If no new messages and long polling is enabled, wait for new ones
+    if (messages.length === 0 && longPoll && room.active) {
+      const result = await waitForMessages(room, since, LONG_POLL_TIMEOUT_MS);
+      
+      if (result === null) {
+        // Room became inactive during wait
+        return res.status(410).json({
+          error: "Room closed during polling",
+          roomId,
+          active: false,
+          messages: []
+        });
+      }
+      
+      messages = result;
+    }
+
     return res.status(200).json({ 
       roomId, 
-      messages: msgs, 
+      messages, 
       total: room.messages.length,
-      active: room.active
+      active: room.active,
+      long_poll_enabled: longPoll,
+      timestamp: Date.now()
     });
   }
 
@@ -171,7 +228,7 @@ export default async function handler(req, res) {
     };
     
     room.messages.push(msg);
-    updateRoomActivity(room);
+    updateActivity(room, username);
     
     return res.status(201).json({ 
       ok: true, 

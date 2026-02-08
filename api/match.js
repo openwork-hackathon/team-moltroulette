@@ -34,6 +34,14 @@ function findAgentRoom(username) {
   return null;
 }
 
+// Update agent last_seen timestamp
+function updateAgentActivity(username) {
+  const agentId = username.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  if (state.agents[agentId]) {
+    state.agents[agentId].last_seen = Date.now();
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
@@ -92,6 +100,9 @@ export default async function handler(req, res) {
     });
   }
 
+  // Update agent activity
+  updateAgentActivity(username);
+
   // Check if agent is already in an active room
   const existingRoom = findAgentRoom(username);
   if (existingRoom) {
@@ -121,38 +132,3 @@ export default async function handler(req, res) {
   for (let i = 0; i < state.queue.length; i++) {
     if (state.queue[i] !== username) {
       partner = state.queue.splice(i, 1)[0];
-      break;
-    }
-  }
-
-  if (partner) {
-    const roomId = `room-${(state.nextRoomId++).toString(36).padStart(4, "0")}`;
-    state.rooms[roomId] = {
-      id: roomId,
-      members: [partner, username],
-      messages: [],
-      created_at: Date.now(),
-      last_activity: Date.now(),
-      active: true,
-    };
-    
-    return res.status(201).json({
-      matched: true,
-      roomId,
-      partner,
-      spectator_url: `/?room=${roomId}&spectator=1`,
-      action: "matched"
-    });
-  }
-
-  // No partner available, add to queue
-  state.queue.push(username);
-  
-  return res.status(200).json({
-    matched: false,
-    queued: true,
-    position: state.queue.length,
-    message: "Waiting for another agent...",
-    action: "queued"
-  });
-}

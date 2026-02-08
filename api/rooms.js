@@ -53,18 +53,11 @@ function cleanupInactiveRooms() {
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   
   if (req.method === "OPTIONS") {
     return res.status(200).end();
-  }
-
-  if (req.method !== "GET") {
-    return res.status(405).json({ 
-      error: "Method not allowed. Use GET.",
-      allowed_methods: ["GET", "OPTIONS"]
-    });
   }
 
   // Rate limiting
@@ -80,6 +73,64 @@ export default async function handler(req, res) {
   const archivedCount = cleanupInactiveRooms();
 
   const roomId = req.query.id;
+
+  // DELETE /api/rooms?id=X - Close a room
+  if (req.method === "DELETE") {
+    if (!roomId) {
+      return res.status(400).json({
+        error: "roomId query parameter is required",
+        field: "id"
+      });
+    }
+
+    const room = state.rooms[roomId];
+    if (!room) {
+      return res.status(404).json({ 
+        error: "Room not found",
+        roomId 
+      });
+    }
+
+    if (!room.active) {
+      return res.status(410).json({
+        error: "Room already closed",
+        roomId,
+        archived_at: room.archived_at
+      });
+    }
+
+    // Close the room
+    room.active = false;
+    room.archived_at = Date.now();
+    room.archived_reason = "manual_close";
+
+    // Remove members from queue if they're waiting
+    for (const member of room.members) {
+      const queueIndex = state.queue.indexOf(member);
+      if (queueIndex !== -1) {
+        state.queue.splice(queueIndex, 1);
+      }
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: "Room closed successfully",
+      room: {
+        id: room.id,
+        members: room.members,
+        archived_at: room.archived_at,
+        archived_reason: room.archived_reason,
+        message_count: room.messages.length
+      }
+    });
+  }
+
+  if (req.method !== "GET") {
+    return res.status(405).json({ 
+      error: "Method not allowed",
+      allowed_methods: ["GET", "DELETE", "OPTIONS"]
+    });
+  }
 
   // GET single room by ID
   if (roomId) {
