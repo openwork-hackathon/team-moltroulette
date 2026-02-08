@@ -24,7 +24,7 @@ const ROOM_TIMEOUT_MS = 10 * 60 * 1000;
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
 function sanitizeAvatarUrl(url) {
@@ -37,6 +37,28 @@ function sanitizeAvatarUrl(url) {
 function parseRedis(raw) {
   if (!raw) return null;
   return typeof raw === "string" ? JSON.parse(raw) : raw;
+}
+
+function generateToken() {
+  const chars = "abcdef0123456789";
+  let token = "molt_";
+  for (let i = 0; i < 32; i++) token += chars[Math.floor(Math.random() * chars.length)];
+  return token;
+}
+
+async function authenticateAgent(req, res) {
+  const auth = req.headers.authorization || "";
+  if (!auth.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Missing Authorization header. Use: Bearer <token> from /api/register" });
+    return null;
+  }
+  const token = auth.slice(7).trim();
+  const agent_id = await redis.get(`token:${token}`);
+  if (!agent_id) {
+    res.status(401).json({ error: "Invalid token. Register via POST /api/register to get a token." });
+    return null;
+  }
+  return typeof agent_id === "string" ? agent_id : String(agent_id);
 }
 
 async function handleRegister(req, res) {
@@ -53,10 +75,12 @@ async function handleRegister(req, res) {
     const counter = await redis.incr("agent_id_counter");
     const base = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20);
     const agent_id = `agent-${counter}-${base}`;
+    const token = generateToken();
     const agent = { agent_id, name: cleanName, avatar_url: sanitizedAvatar, registered_at: Date.now() };
     await redis.set(`agent:${agent_id}`, JSON.stringify(agent));
+    await redis.set(`token:${token}`, agent_id);
     await redis.sadd("agents", agent_id);
-    return res.status(201).json({ agent_id, name: cleanName, avatar_url: sanitizedAvatar });
+    return res.status(201).json({ agent_id, name: cleanName, avatar_url: sanitizedAvatar, token });
   }
   if (req.method === "GET") {
     const agentIds = await redis.smembers("agents");
@@ -107,8 +131,11 @@ async function handleQueue(req, res) {
     return res.status(200).json({ matched: false, queued: false });
   }
   if (req.method === "POST") {
+    const authedAgentId = await authenticateAgent(req, res);
+    if (!authedAgentId) return;
     const { agent_id } = req.body || {};
     if (!agent_id) return res.status(400).json({ error: "agent_id is required" });
+    if (agent_id !== authedAgentId) return res.status(403).json({ error: "Token does not match agent_id" });
     const agent = parseRedis(await redis.get(`agent:${agent_id}`));
     if (!agent) return res.status(400).json({ error: "Agent not registered. Call POST /api/register first." });
     const existingRoom = await findRoomForAgent(agent_id);
@@ -164,9 +191,12 @@ async function handleMessages(req, res) {
     return res.status(200).json({ ok: true, room_id, messages, total: room.messages.length });
   }
   if (req.method === "POST") {
+    const authedAgentId = await authenticateAgent(req, res);
+    if (!authedAgentId) return;
     const { room_id, agent_id, text } = req.body || {};
     if (!room_id) return res.status(400).json({ error: "room_id is required" });
     if (!agent_id) return res.status(400).json({ error: "agent_id is required" });
+    if (agent_id !== authedAgentId) return res.status(403).json({ error: "Token does not match agent_id" });
     if (!text || typeof text !== "string" || text.trim().length === 0) return res.status(400).json({ error: "text is required" });
     if (text.length > 5000) return res.status(400).json({ error: "text too long (max 5000)" });
     const room = parseRedis(await redis.get(`room:${room_id}`));
@@ -191,9 +221,12 @@ async function handleMessages(req, res) {
 
 async function handleLeave(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const authedAgentId = await authenticateAgent(req, res);
+  if (!authedAgentId) return;
   const { room_id, agent_id, requeue } = req.body || {};
   if (!room_id) return res.status(400).json({ error: "room_id is required" });
   if (!agent_id) return res.status(400).json({ error: "agent_id is required" });
+  if (agent_id !== authedAgentId) return res.status(403).json({ error: "Token does not match agent_id" });
   const room = parseRedis(await redis.get(`room:${room_id}`));
   if (!room) return res.status(404).json({ error: "Room not found", room_id });
   if (!room.active) return res.status(410).json({ error: "Room is no longer active" });
