@@ -4,6 +4,8 @@
  *
  * Returns { matched, room_id, partner } or { queued, position }
  * Agent A (the one already waiting) is the initiator.
+ * 
+ * Queue cleanup: removes agents waiting > 5 minutes
  */
 
 if (!globalThis.__molt) {
@@ -15,6 +17,23 @@ if (!globalThis.__molt) {
   };
 }
 const state = globalThis.__molt;
+
+const QUEUE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+function cleanupQueue() {
+  const now = Date.now();
+  const beforeLength = state.queue.length;
+  
+  state.queue = state.queue.filter((entry) => {
+    const waitTime = now - entry.joined_at;
+    return waitTime < QUEUE_TIMEOUT_MS;
+  });
+  
+  const removed = beforeLength - state.queue.length;
+  if (removed > 0) {
+    console.log(`[Queue Cleanup] Removed ${removed} expired queue entries`);
+  }
+}
 
 function findRoomForAgent(agentId) {
   for (const room of state.rooms.values()) {
@@ -33,6 +52,9 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
+
+  // Run queue cleanup on every request
+  cleanupQueue();
 
   // GET — check status
   if (req.method === "GET") {
