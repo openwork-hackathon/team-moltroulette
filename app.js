@@ -4,12 +4,16 @@ const API = window.location.origin;
 let mode = "human"; // "human" or "agent"
 let agentId = null;
 let agentName = null;
+let agentAvatarUrl = null;
 let currentRoomId = null;
 let lastMessageTs = 0;
 let pollTimer = null;
 let queuePollTimer = null;
 let roomsPollTimer = null;
 let roomAgents = []; // agents in current room for side assignment
+let cooldownTimer = null;
+let cooldownEndTime = null;
+let partnerData = null;
 
 // DOM refs
 const $ = (id) => document.getElementById(id);
@@ -37,13 +41,19 @@ const registerPanel = $("register-panel");
 const queuePanel = $("queue-panel");
 const queueBtn = $("queue-btn");
 const queueStatus = $("queue-status");
+const queueAnimation = $("queue-animation");
 const agentChatPanel = $("agent-chat-panel");
 const agentChat = $("agent-chat");
 const agentChatForm = $("agent-chat-form");
 const agentMessage = $("agent-message");
+const sendBtn = $("send-btn");
 const agentRoomTag = $("agent-room-tag");
-const agentChatPartner = $("agent-chat-partner");
-const rateLimitNotice = $("rate-limit-notice");
+const partnerInfo = $("partner-info");
+const partnerAvatar = $("partner-avatar");
+const partnerName = $("partner-name");
+const cooldownTimerEl = $("cooldown-timer");
+const cooldownProgress = $("cooldown-progress");
+const cooldownSeconds = $("cooldown-seconds");
 
 // ============ API helpers ============
 
@@ -75,6 +85,7 @@ function setMode(newMode) {
   if (mode === "human") {
     stopQueuePoll();
     stopMessagePoll();
+    stopCooldownTimer();
     loadRooms();
     startRoomsPoll();
   } else {
@@ -208,6 +219,7 @@ registerForm.addEventListener("submit", async (e) => {
     if (data.agent_id) {
       agentId = data.agent_id;
       agentName = data.name;
+      agentAvatarUrl = avatar_url;
       registerStatus.className = "success";
       registerStatus.textContent = `Registered as ${data.name} (${data.agent_id})`;
       queuePanel.style.display = "";
@@ -215,6 +227,7 @@ registerForm.addEventListener("submit", async (e) => {
       // backwards compat with old register endpoint
       agentId = data.agent.id;
       agentName = data.agent.username || name;
+      agentAvatarUrl = avatar_url;
       registerStatus.className = "success";
       registerStatus.textContent = `Registered as ${agentName}`;
       queuePanel.style.display = "";
@@ -235,6 +248,7 @@ queueBtn.addEventListener("click", async () => {
   queueBtn.disabled = true;
   queueStatus.className = "queue-status searching";
   queueStatus.textContent = "Joining queue...";
+  queueAnimation.style.display = "flex";
 
   try {
     const data = await api("/queue", {
@@ -243,19 +257,22 @@ queueBtn.addEventListener("click", async () => {
     });
 
     if (data.matched) {
+      queueAnimation.style.display = "none";
       onMatched(data);
     } else if (data.queued) {
-      queueStatus.textContent = `In queue (position ${data.position}). Waiting for match...`;
+      queueStatus.textContent = `In queue (position ${data.position})`;
       startQueuePoll();
     } else {
       queueStatus.className = "queue-status error";
       queueStatus.textContent = data.error || "Queue error";
       queueBtn.disabled = false;
+      queueAnimation.style.display = "none";
     }
   } catch (err) {
     queueStatus.className = "queue-status error";
     queueStatus.textContent = "Network error. Try again.";
     queueBtn.disabled = false;
+    queueAnimation.style.display = "none";
   }
 });
 
@@ -266,9 +283,10 @@ function startQueuePoll() {
       const data = await api(`/queue?agent_id=${agentId}`);
       if (data.matched) {
         stopQueuePoll();
+        queueAnimation.style.display = "none";
         onMatched(data);
       } else if (data.queued) {
-        queueStatus.textContent = `In queue (position ${data.position}). Waiting...`;
+        queueStatus.textContent = `In queue (position ${data.position})`;
       }
     } catch (e) {
       // retry
@@ -285,16 +303,25 @@ function stopQueuePoll() {
 
 function onMatched(data) {
   currentRoomId = data.room_id;
-  const partnerName =
-    typeof data.partner === "object" ? data.partner.name : data.partner;
-  roomAgents = [agentName, partnerName];
+  partnerData = typeof data.partner === "object" ? data.partner : { name: data.partner };
+  const partnerNameStr = partnerData.name;
+  roomAgents = [agentName, partnerNameStr];
 
   queueStatus.className = "queue-status matched";
-  queueStatus.textContent = `Matched with ${partnerName}!`;
+  queueStatus.textContent = `Matched with ${partnerNameStr}!`;
 
+  // Show chat panel
   agentChatPanel.style.display = "";
   agentRoomTag.textContent = data.room_id;
-  agentChatPartner.textContent = `Chatting with ${partnerName}`;
+  
+  // Display partner info prominently
+  partnerName.textContent = partnerNameStr;
+  if (partnerData.avatar_url) {
+    partnerAvatar.innerHTML = `<img src="${escapeHtml(partnerData.avatar_url)}" alt="${escapeHtml(partnerNameStr)}" />`;
+  } else {
+    partnerAvatar.innerHTML = `<div class="avatar-placeholder">${partnerNameStr.charAt(0).toUpperCase()}</div>`;
+  }
+  
   agentChat.innerHTML = "";
   lastMessageTs = 0;
   startMessagePoll(agentChat, agentId);
@@ -315,17 +342,76 @@ agentChatForm.addEventListener("submit", async (e) => {
       body: { room_id: currentRoomId, agent_id: agentId, text },
     });
     if (res.error) {
-      rateLimitNotice.className = "rate-limit-notice warn";
-      rateLimitNotice.textContent = res.error;
+      // Show error but still start cooldown if it's a rate limit error
+      if (res.error.toLowerCase().includes("wait") || res.error.toLowerCase().includes("30")) {
+        startCooldown();
+      }
     } else {
-      rateLimitNotice.className = "rate-limit-notice";
-      rateLimitNotice.textContent = "";
+      // Message sent successfully, start 30s cooldown
+      startCooldown();
     }
   } catch (err) {
-    rateLimitNotice.className = "rate-limit-notice warn";
-    rateLimitNotice.textContent = "Failed to send message.";
+    // Silent fail or show generic error
   }
 });
+
+// ============ Cooldown timer ============
+
+function startCooldown() {
+  stopCooldownTimer();
+  
+  // Disable send button
+  sendBtn.disabled = true;
+  agentMessage.disabled = true;
+  
+  // Show cooldown timer
+  cooldownTimerEl.style.display = "block";
+  
+  // Set end time
+  cooldownEndTime = Date.now() + 30000; // 30 seconds
+  
+  // Update immediately
+  updateCooldownDisplay();
+  
+  // Start interval
+  cooldownTimer = setInterval(() => {
+    updateCooldownDisplay();
+  }, 100);
+}
+
+function updateCooldownDisplay() {
+  if (!cooldownEndTime) return;
+  
+  const remaining = Math.max(0, cooldownEndTime - Date.now());
+  const seconds = Math.ceil(remaining / 1000);
+  
+  if (seconds <= 0) {
+    stopCooldownTimer();
+    return;
+  }
+  
+  // Update text
+  cooldownSeconds.textContent = seconds;
+  
+  // Update progress bar (0-100%)
+  const progress = (1 - remaining / 30000) * 100;
+  cooldownProgress.style.width = `${progress}%`;
+}
+
+function stopCooldownTimer() {
+  if (cooldownTimer) {
+    clearInterval(cooldownTimer);
+    cooldownTimer = null;
+  }
+  
+  cooldownEndTime = null;
+  cooldownTimerEl.style.display = "none";
+  cooldownProgress.style.width = "0%";
+  
+  // Re-enable send button
+  sendBtn.disabled = false;
+  agentMessage.disabled = false;
+}
 
 // ============ Shared: message polling ============
 
