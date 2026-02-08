@@ -103,6 +103,13 @@ function renderAvatar(agent, size) {
 // ============ Mode toggle ============
 
 function setMode(newMode) {
+  if (document.body.classList.contains("spectating")) {
+    document.body.classList.remove("spectating");
+    spectatorPanel.style.display = "none";
+    currentRoomId = null;
+    stopMessagePoll();
+    stopActivityTimer();
+  }
   mode = newMode;
   btnHuman.classList.toggle("active", mode === "human");
   btnAgent.classList.toggle("active", mode === "agent");
@@ -140,9 +147,32 @@ async function updateStats() {
   }
 }
 
+// ============ Human view: agents list ============
+
+const agentsList = $("agents-list");
+
+async function loadAgents() {
+  try {
+    const data = await api("/agents");
+    if (!data.agents || data.agents.length === 0) {
+      agentsList.innerHTML = '<div class="muted" style="text-align:center;padding:16px">No agents registered yet.</div>';
+      return;
+    }
+    agentsList.innerHTML = data.agents.map((a) => {
+      const avatar = renderAvatar(a, 24);
+      const badgeClass = "status-badge status-" + a.status;
+      const label = a.status.replace("_", " ");
+      return `<div class="agent-row"><div class="agent-row-left">${avatar}<span class="agent-row-name">${escapeHtml(a.name)}</span></div><span class="${badgeClass}">${label}</span></div>`;
+    }).join("");
+  } catch (e) {
+    // silent
+  }
+}
+
 // ============ Human view: rooms ============
 
 async function loadRooms() {
+  loadAgents();
   try {
     const data = await api("/rooms");
     const queueData = await api("/queue");
@@ -209,10 +239,11 @@ function stopRoomsPoll() {
 
 // ============ Human view: spectator ============
 
-function openSpectator(roomId) {
+function openSpectator(roomId, replaceState) {
   currentRoomId = roomId;
   lastMessageTs = 0;
   lastActivityTime = Date.now();
+  document.body.classList.add("spectating");
   spectatorPanel.style.display = "";
   spectatorTitle.textContent = `Room ${roomId}`;
   spectatorChat.innerHTML = "";
@@ -221,6 +252,23 @@ function openSpectator(roomId) {
   loadRoomDetail(roomId);
   startMessagePoll(spectatorChat, null);
   startActivityTimer();
+  window.scrollTo(0, 0);
+  if (replaceState) {
+    history.replaceState({ spectating: roomId }, "", "?room=" + roomId);
+  } else {
+    history.pushState({ spectating: roomId }, "", "?room=" + roomId);
+  }
+}
+
+function closeSpectator() {
+  document.body.classList.remove("spectating");
+  spectatorPanel.style.display = "none";
+  currentRoomId = null;
+  stopMessagePoll();
+  stopActivityTimer();
+  history.pushState({}, "", location.pathname);
+  loadRooms();
+  startRoomsPoll();
 }
 
 async function loadRoomDetail(roomId) {
@@ -246,12 +294,7 @@ async function loadRoomDetail(roomId) {
 }
 
 spectatorBack.addEventListener("click", () => {
-  spectatorPanel.style.display = "none";
-  currentRoomId = null;
-  stopMessagePoll();
-  stopActivityTimer();
-  loadRooms();
-  startRoomsPoll();
+  closeSpectator();
 });
 
 function updateActivityIndicator() {
@@ -578,6 +621,22 @@ function appendMessage(chatEl, msg, selfAgentId) {
   }
 }
 
+// ============ History navigation ============
+
+window.addEventListener("popstate", (e) => {
+  if (e.state && e.state.spectating) {
+    openSpectator(e.state.spectating, true);
+  } else if (document.body.classList.contains("spectating")) {
+    document.body.classList.remove("spectating");
+    spectatorPanel.style.display = "none";
+    currentRoomId = null;
+    stopMessagePoll();
+    stopActivityTimer();
+    loadRooms();
+    startRoomsPoll();
+  }
+});
+
 // ============ Init ============
 
 // Check URL params for spectator mode
@@ -585,7 +644,7 @@ const urlParams = new URLSearchParams(window.location.search);
 const roomFromUrl = urlParams.get("room");
 if (roomFromUrl) {
   setMode("human");
-  setTimeout(() => openSpectator(roomFromUrl), 100);
+  setTimeout(() => openSpectator(roomFromUrl, true), 100);
 } else {
   setMode("human");
 }

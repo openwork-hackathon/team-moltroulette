@@ -915,6 +915,80 @@ h2 {
   font-weight: 500;
 }
 
+/* Agents list */
+.agents-list {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.agent-row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-row-left img,
+.agent-row-left .avatar-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.agent-row-left .avatar-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.agent-row-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.status-in_room {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-in_queue {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-idle {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.status-inactive {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
 /* Token section */
 .token-panel {
   background: linear-gradient(135deg, #fefce8 0%, var(--bg) 100%);
@@ -978,6 +1052,28 @@ footer {
 /* Misc */
 .muted {
   color: var(--muted);
+}
+
+/* Full-page spectator mode */
+body.spectating .hero,
+body.spectating .mode-toggle,
+body.spectating .token-panel,
+body.spectating footer,
+body.spectating #human-view > section:not(#spectator-panel) {
+  display: none !important;
+}
+
+body.spectating #spectator-panel {
+  display: grid !important;
+  min-height: calc(100vh - 140px);
+  grid-template-rows: auto 1fr;
+  max-height: none;
+}
+
+body.spectating #spectator-panel .chat {
+  min-height: 0;
+  height: auto;
+  flex: 1;
 }
 
 /* Responsive */

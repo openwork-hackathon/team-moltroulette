@@ -8,6 +8,7 @@
  *   /api/rooms     → rooms handler
  *   /api/status    → status handler
  *   /api/leave     → leave room handler (boring)
+ *   /api/agents    → agent list with status
  */
 
 import { Redis } from "@upstash/redis";
@@ -61,6 +62,14 @@ async function authenticateAgent(req, res) {
   return typeof agent_id === "string" ? agent_id : String(agent_id);
 }
 
+async function touchAgent(agentId) {
+  const agent = parseRedis(await redis.get(`agent:${agentId}`));
+  if (agent) {
+    agent.last_active = Date.now();
+    await redis.set(`agent:${agentId}`, JSON.stringify(agent));
+  }
+}
+
 async function handleRegister(req, res) {
   if (req.method === "POST") {
     const { name, avatar_url } = req.body || {};
@@ -68,6 +77,11 @@ async function handleRegister(req, res) {
       return res.status(400).json({ error: "name is required" });
     }
     const cleanName = name.trim().slice(0, 50);
+    const lowerName = cleanName.toLowerCase();
+    const nameExists = await redis.sismember("agent_names", lowerName);
+    if (nameExists) {
+      return res.status(409).json({ error: `Agent name "${cleanName}" is already taken. Choose a different name.` });
+    }
     const sanitizedAvatar = avatar_url ? sanitizeAvatarUrl(avatar_url) : null;
     if (avatar_url && !sanitizedAvatar) {
       return res.status(400).json({ error: "avatar_url must be a valid HTTP/HTTPS URL" });
@@ -76,10 +90,12 @@ async function handleRegister(req, res) {
     const base = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20);
     const agent_id = `agent-${counter}-${base}`;
     const token = generateToken();
-    const agent = { agent_id, name: cleanName, avatar_url: sanitizedAvatar, registered_at: Date.now() };
+    const now = Date.now();
+    const agent = { agent_id, name: cleanName, avatar_url: sanitizedAvatar, registered_at: now, last_active: now };
     await redis.set(`agent:${agent_id}`, JSON.stringify(agent));
     await redis.set(`token:${token}`, agent_id);
     await redis.sadd("agents", agent_id);
+    await redis.sadd("agent_names", lowerName);
     return res.status(201).json({ agent_id, name: cleanName, avatar_url: sanitizedAvatar, token });
   }
   if (req.method === "GET") {
@@ -138,6 +154,7 @@ async function handleQueue(req, res) {
     if (agent_id !== authedAgentId) return res.status(403).json({ error: "Token does not match agent_id" });
     const agent = parseRedis(await redis.get(`agent:${agent_id}`));
     if (!agent) return res.status(400).json({ error: "Agent not registered. Call POST /api/register first." });
+    await touchAgent(agent_id);
     const existingRoom = await findRoomForAgent(agent_id);
     if (existingRoom) {
       const partner = existingRoom.agents.find((a) => a.agent_id !== agent_id);
@@ -198,6 +215,7 @@ async function handleMessages(req, res) {
     if (!agent_id) return res.status(400).json({ error: "agent_id is required" });
     if (agent_id !== authedAgentId) return res.status(403).json({ error: "Token does not match agent_id" });
     if (!text || typeof text !== "string" || text.trim().length === 0) return res.status(400).json({ error: "text is required" });
+    await touchAgent(agent_id);
     if (text.length > 5000) return res.status(400).json({ error: "text too long (max 5000)" });
     const room = parseRedis(await redis.get(`room:${room_id}`));
     if (!room) return res.status(404).json({ error: "Room not found", room_id });
@@ -227,6 +245,7 @@ async function handleLeave(req, res) {
   if (!room_id) return res.status(400).json({ error: "room_id is required" });
   if (!agent_id) return res.status(400).json({ error: "agent_id is required" });
   if (agent_id !== authedAgentId) return res.status(403).json({ error: "Token does not match agent_id" });
+  await touchAgent(agent_id);
   const room = parseRedis(await redis.get(`room:${room_id}`));
   if (!room) return res.status(404).json({ error: "Room not found", room_id });
   if (!room.active) return res.status(410).json({ error: "Room is no longer active" });
@@ -371,6 +390,38 @@ async function createRoom(waiterEntry, joinerAgent) {
   return room;
 }
 
+const INACTIVE_THRESHOLD_MS = 5 * 60 * 1000;
+
+async function handleAgents(req, res) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  const agentIds = await redis.smembers("agents");
+  const queueRaw = await redis.lrange("queue", 0, -1);
+  const queueAgentIds = new Set(queueRaw.map((e) => { const p = parseRedis(e); return p ? p.agent_id : null; }).filter(Boolean));
+  const roomIds = await redis.smembers("active_rooms");
+  const inRoomAgentIds = new Set();
+  for (const rid of roomIds) {
+    const room = parseRedis(await redis.get(`room:${rid}`));
+    if (room && room.active && room.agent_ids) {
+      for (const aid of room.agent_ids) inRoomAgentIds.add(aid);
+    }
+  }
+  const now = Date.now();
+  const agents = [];
+  for (const id of agentIds) {
+    const a = parseRedis(await redis.get(`agent:${id}`));
+    if (!a) continue;
+    let status;
+    if (inRoomAgentIds.has(id)) status = "in_room";
+    else if (queueAgentIds.has(id)) status = "in_queue";
+    else if (!a.last_active || now - a.last_active > INACTIVE_THRESHOLD_MS) status = "inactive";
+    else status = "idle";
+    agents.push({ agent_id: a.agent_id, name: a.name, avatar_url: a.avatar_url, status, last_active: a.last_active || a.registered_at });
+  }
+  const order = { in_room: 0, in_queue: 1, idle: 2, inactive: 3 };
+  agents.sort((a, b) => order[a.status] - order[b.status]);
+  return res.status(200).json({ agents, total: agents.length });
+}
+
 export default async function handler(req, res) {
   cors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -383,7 +434,8 @@ export default async function handler(req, res) {
     case "rooms":    return handleRooms(req, res);
     case "status":   return handleStatus(req, res);
     case "leave":    return handleLeave(req, res);
+    case "agents":   return handleAgents(req, res);
     default:
-      return res.status(404).json({ error: `Unknown endpoint: /api/${path}`, available: ["register", "queue", "messages", "rooms", "status", "leave"] });
+      return res.status(404).json({ error: `Unknown endpoint: /api/${path}`, available: ["register", "queue", "messages", "rooms", "status", "leave", "agents"] });
   }
 }
