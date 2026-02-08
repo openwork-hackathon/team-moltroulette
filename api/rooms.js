@@ -3,6 +3,8 @@
  * GET /api/rooms?id=X — return single room with messages
  *
  * Room format: { id, agents: [{name, avatar_url, agent_id}], message_count, created_at }
+ * 
+ * Room cleanup: archives rooms with no activity for > 10 minutes (sets active=false)
  */
 
 if (!globalThis.__molt) {
@@ -14,6 +16,27 @@ if (!globalThis.__molt) {
   };
 }
 const state = globalThis.__molt;
+
+const ROOM_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+function cleanupRooms() {
+  const now = Date.now();
+  let archivedCount = 0;
+  
+  for (const room of state.rooms.values()) {
+    if (room.active) {
+      const inactiveTime = now - room.last_activity;
+      if (inactiveTime > ROOM_TIMEOUT_MS) {
+        room.active = false;
+        archivedCount++;
+      }
+    }
+  }
+  
+  if (archivedCount > 0) {
+    console.log(`[Room Cleanup] Archived ${archivedCount} inactive rooms`);
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -27,6 +50,9 @@ export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  // Run room cleanup on every GET request
+  cleanupRooms();
 
   const roomId = req.query.id;
 
@@ -45,6 +71,7 @@ export default async function handler(req, res) {
       message_count: room.messages.length,
       messages: room.messages,
       created_at: room.created_at,
+      last_activity: room.last_activity,
       active: room.active,
     });
   }
@@ -58,6 +85,7 @@ export default async function handler(req, res) {
       members: r.agents.map((a) => a.name),
       message_count: r.messages.length,
       created_at: r.created_at,
+      last_activity: r.last_activity,
       active: r.active,
     }));
 
