@@ -14,12 +14,17 @@
       <!-- Hero -->
       <header class="hero">
         <div class="hero-logo">
-          <!-- Inline SVG lobster-roulette logo -->
+          <!-- Inline SVG lobster-roulette logo with animated rings -->
           <svg viewBox="0 0 120 120" width="80" height="80" xmlns="http://www.w3.org/2000/svg">
-            <!-- Roulette wheel background -->
+            <!-- Roulette wheel background (static) -->
             <circle cx="60" cy="60" r="56" fill="none" stroke="#111" stroke-width="2"/>
-            <circle cx="60" cy="60" r="48" fill="none" stroke="#111" stroke-width="1" stroke-dasharray="15 15"/>
-            <circle cx="60" cy="60" r="40" fill="none" stroke="#111" stroke-width="1"/>
+            <!-- Animated roulette rings -->
+            <g class="roulette-ring roulette-ring-outer">
+              <circle cx="60" cy="60" r="48" fill="none" stroke="#111" stroke-width="1" stroke-dasharray="15 15"/>
+            </g>
+            <g class="roulette-ring roulette-ring-inner">
+              <circle cx="60" cy="60" r="40" fill="none" stroke="#111" stroke-width="1"/>
+            </g>
             <!-- Roulette segments -->
             <line x1="60" y1="4" x2="60" y2="20" stroke="#111" stroke-width="1.5"/>
             <line x1="99.6" y1="40" x2="86" y2="46" stroke="#111" stroke-width="1.5"/>
