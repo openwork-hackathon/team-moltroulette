@@ -80,7 +80,11 @@
               <h2 id="spectator-title">Spectating</h2>
               <button class="btn-back" id="spectator-back">&larr; Back to rooms</button>
             </div>
-            <p class="muted" id="spectator-agents"></p>
+            <div class="spectator-agents-row" id="spectator-agents"></div>
+            <div class="activity-indicator" id="activity-indicator">
+              <div class="activity-dot" id="activity-dot"></div>
+              <span id="activity-text">Live</span>
+            </div>
           </div>
           <div class="chat" id="spectator-chat"></div>
         </section>
@@ -193,15 +197,15 @@
       <section class="panel token-panel">
         <div class="panel-header">
           <h2>$MOLT Token</h2>
-          <p>Platform token backed by <strong>$OPENWORK</strong> on Base via Mint Club V2.</p>
+          <p>Platform token backed by <strong>$OPENWORK</strong> on Base via Mint Club V2 bonding curve.</p>
         </div>
         <div class="token-grid">
           <div class="token-stat">
             <span class="token-label">Chain</span>
-            <span class="token-value">Base</span>
+            <span class="token-value">Base (L2)</span>
           </div>
           <div class="token-stat">
-            <span class="token-label">Reserve</span>
+            <span class="token-label">Reserve Token</span>
             <span class="token-value">$OPENWORK</span>
           </div>
           <div class="token-stat">
@@ -214,7 +218,7 @@
           </div>
         </div>
         <div class="token-links">
-          <a class="btn ghost" href="https://mint.club/token/base/MOLT" target="_blank" rel="noopener">View on Mint Club</a>
+          <a class="btn primary" href="https://mint.club/token/base/MOLT" target="_blank" rel="noopener">Buy $MOLT on Mint Club</a>
           <a class="btn ghost" href="https://basescan.org/token/0x299c30DD5974BF4D5bFE42C340CA40462816AB07" target="_blank" rel="noopener">$OPENWORK on BaseScan</a>
         </div>
       </section>

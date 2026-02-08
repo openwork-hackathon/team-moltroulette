@@ -14,6 +14,9 @@ let roomAgents = []; // agents in current room for side assignment
 let cooldownTimer = null;
 let cooldownEndTime = null;
 let partnerData = null;
+let lastActivityTime = 0;
+let activityTimer = null;
+let roomAgentsData = []; // full agent objects for spectator display
 
 // DOM refs
 const $ = (id) => document.getElementById(id);
@@ -31,6 +34,9 @@ const spectatorTitle = $("spectator-title");
 const spectatorAgents = $("spectator-agents");
 const spectatorChat = $("spectator-chat");
 const spectatorBack = $("spectator-back");
+const activityIndicator = $("activity-indicator");
+const activityDot = $("activity-dot");
+const activityText = $("activity-text");
 
 // Agent view
 const registerForm = $("register-form");
@@ -184,25 +190,36 @@ function stopRoomsPoll() {
 function openSpectator(roomId) {
   currentRoomId = roomId;
   lastMessageTs = 0;
+  lastActivityTime = Date.now();
   spectatorPanel.style.display = "";
   spectatorTitle.textContent = `Room ${roomId}`;
   spectatorChat.innerHTML = "";
-  spectatorAgents.textContent = "Loading...";
+  spectatorAgents.innerHTML = '<span class="muted">Loading...</span>';
   stopRoomsPoll();
   loadRoomDetail(roomId);
   startMessagePoll(spectatorChat, null);
+  startActivityTimer();
 }
 
 async function loadRoomDetail(roomId) {
   try {
     const data = await api(`/rooms?id=${roomId}`);
-    const names = (data.agents || data.members || []).map((a) =>
-      typeof a === "object" ? a.name : a
-    );
+    const agents = data.agents || data.members || [];
+    const names = agents.map((a) => typeof a === "object" ? a.name : a);
     roomAgents = names;
-    spectatorAgents.textContent = names.join(" vs ");
+    roomAgentsData = agents;
+    // Render agent cards with avatars
+    spectatorAgents.innerHTML = agents.map((a, i) => {
+      const name = typeof a === "object" ? a.name : a;
+      const avatar = renderAvatar(a, 28);
+      return `<div class="spectator-agent-card">${avatar}<span>${escapeHtml(name)}</span></div>` +
+        (i < agents.length - 1 ? '<span class="spectator-vs">vs</span>' : '');
+    }).join('');
+    // Set initial activity time
+    lastActivityTime = Date.now();
+    updateActivityIndicator();
   } catch (e) {
-    spectatorAgents.textContent = "Unknown agents";
+    spectatorAgents.innerHTML = '<span class="muted">Unknown agents</span>';
   }
 }
 
@@ -210,9 +227,35 @@ spectatorBack.addEventListener("click", () => {
   spectatorPanel.style.display = "none";
   currentRoomId = null;
   stopMessagePoll();
+  stopActivityTimer();
   loadRooms();
   startRoomsPoll();
 });
+
+function updateActivityIndicator() {
+  if (!activityDot || !activityText) return;
+  const elapsed = Date.now() - lastActivityTime;
+  if (elapsed < 60000) {
+    activityDot.className = "activity-dot";
+    activityText.textContent = "Live";
+  } else {
+    activityDot.className = "activity-dot inactive";
+    const mins = Math.floor(elapsed / 60000);
+    activityText.textContent = `Last activity ${mins}m ago`;
+  }
+}
+
+function startActivityTimer() {
+  stopActivityTimer();
+  activityTimer = setInterval(updateActivityIndicator, 5000);
+}
+
+function stopActivityTimer() {
+  if (activityTimer) {
+    clearInterval(activityTimer);
+    activityTimer = null;
+  }
+}
 
 // ============ Agent view: registration ============
 
@@ -449,6 +492,10 @@ async function pollMessages(chatEl, selfAgentId) {
       `/messages?room_id=${currentRoomId}&since=${lastMessageTs}&long_poll=false`
     );
     const msgs = data.messages || [];
+    if (msgs.length > 0) {
+      lastActivityTime = Date.now();
+      updateActivityIndicator();
+    }
     for (const msg of msgs) {
       appendMessage(chatEl, msg, selfAgentId);
       if (msg.ts > lastMessageTs) lastMessageTs = msg.ts;
@@ -459,6 +506,9 @@ async function pollMessages(chatEl, selfAgentId) {
 }
 
 function appendMessage(chatEl, msg, selfAgentId) {
+  // Auto-scroll if user is near bottom (within 80px)
+  const shouldScroll = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
+
   const div = document.createElement("div");
   div.className = "chat-message";
 
@@ -468,20 +518,28 @@ function appendMessage(chatEl, msg, selfAgentId) {
   if (isSelf) {
     div.classList.add("self");
   } else if (roomAgents.length >= 2) {
-    // Assign side based on position in room
     const idx = roomAgents.indexOf(senderName);
     div.classList.add(idx === 0 ? "agent-a" : "agent-b");
   } else {
     div.classList.add("agent-a");
   }
 
+  // Find avatar for sender
+  const senderAgent = roomAgentsData.find((a) =>
+    (typeof a === "object" ? a.name : a) === senderName
+  ) || senderName;
+  const avatarHtml = renderAvatar(senderAgent, 20);
+
   div.innerHTML = `
-    <div class="msg-sender">${escapeHtml(senderName)}</div>
+    <div class="msg-sender">${avatarHtml} ${escapeHtml(senderName)}</div>
     <div class="msg-body">${escapeHtml(msg.text)}</div>
     <div class="msg-time">${new Date(msg.ts).toLocaleTimeString()}</div>
   `;
   chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
+
+  if (shouldScroll) {
+    chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: "smooth" });
+  }
 }
 
 // ============ Init ============

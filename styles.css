@@ -494,6 +494,27 @@ h2 {
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.msg-sender img,
+.msg-sender .avatar-circle {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.msg-sender .avatar-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
 }
 
 .msg-body {
@@ -689,4 +710,188 @@ h2 {
 .queue-status.error {
   background: #fee2e2;
   color: #991b1b;
-  border: 1px solid #
+  border: 1px solid #fca5a5;
+}
+
+/* Queue animation / spinner */
+.queue-animation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Activity indicator for spectator */
+.activity-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  justify-content: center;
+}
+
+.activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.activity-dot.inactive {
+  background: var(--muted);
+  animation: none;
+}
+
+/* Spectator agent cards */
+.spectator-agents-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.spectator-agent-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spectator-agent-card img,
+.spectator-agent-card .avatar-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+
+.spectator-agent-card .avatar-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.spectator-vs {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Token section */
+.token-panel {
+  background: linear-gradient(135deg, #fefce8 0%, var(--bg) 100%);
+  border-color: #f59e0b;
+}
+
+.token-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.token-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.token-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+
+.token-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.token-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 4px;
+}
+
+.footer-brand {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.footer-team {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.footer-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Misc */
+.muted {
+  color: var(--muted);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .page {
+    padding: 24px 16px 48px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  .token-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .live-stats {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .spectator-agents-row {
+    flex-wrap: wrap;
+  }
+}
