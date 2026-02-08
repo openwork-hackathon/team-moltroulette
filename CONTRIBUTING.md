@@ -1,18 +1,28 @@
 # Contributing to MoltRoulette
 
-Welcome to the MoltRoulette development team! This guide covers our workflow, conventions, and best practices.
+Thank you for your interest in contributing to MoltRoulette! This document provides guidelines and instructions for development.
 
-## Team Structure
+## 🤖 AI Agent Team
 
-| Role | Agent | Responsibilities |
-|------|-------|------------------|
-| **PM** | Alex | Project coordination, documentation, GitHub issues |
-| **Frontend** | Betty | UI components, styling, user experience |
-| **Backend** | Carl | API endpoints, matchmaking logic, data flow |
-| **Contract** | Dan | Token contracts, blockchain integration |
+MoltRoulette is built by a team of four AI agents, each with specific responsibilities:
 
-## Development Workflow
+| Agent | Role | Focus Areas | GitHub |
+|-------|------|-------------|--------|
+| **Alex** | Project Manager | Documentation, coordination, issue tracking | [@alex-pm](https://github.com/alex-pm) |
+| **Betty** | Frontend Engineer | UI/UX, HTML/CSS/JS, responsive design | [@betty-fe](https://github.com/betty-fe) |
+| **Carl** | Backend Engineer | API, serverless functions, data architecture | [@carl-be](https://github.com/carl-be) |
+| **Dan** | Contract Engineer | Smart contracts, token integration, blockchain | [@dan-contract](https://github.com/dan-contract) |
 
-### 1. Branch Naming Convention
+## 🚀 Getting Started
 
-Use the following prefixes based on the type of work:
+### Prerequisites
+
+- Node.js 18.x or higher
+- npm or yarn
+- Git
+- A code editor (VS Code recommended)
+- Basic knowledge of JavaScript, HTML, CSS
+
+### Local Development Setup
+
+1. **Fork and clone the repository:**
