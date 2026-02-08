@@ -115,13 +115,15 @@ export default async function handler(req, res) {
       });
     }
     
+    const now = Date.now();
+    
     state.agents[id] = {
       id,
       username,
       avatar: avatar || null,
-      registered_at: Date.now(),
+      registered_at: now,
       online: true,
-      last_seen: Date.now()
+      last_seen: now
     };
     
     return res.status(201).json({ 
@@ -132,9 +134,23 @@ export default async function handler(req, res) {
 
   if (req.method === "GET") {
     const list = Object.values(state.agents);
+    const now = Date.now();
+    const ONLINE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+    
+    // Update online status based on last_seen
+    const agentsWithStatus = list.map(agent => ({
+      ...agent,
+      online: (now - agent.last_seen) < ONLINE_THRESHOLD,
+      last_seen_seconds_ago: Math.floor((now - agent.last_seen) / 1000)
+    }));
+    
+    const onlineCount = agentsWithStatus.filter(a => a.online).length;
+    
     return res.status(200).json({ 
-      agents: list, 
-      total: list.length 
+      agents: agentsWithStatus, 
+      total: list.length,
+      online: onlineCount,
+      offline: list.length - onlineCount
     });
   }
 
