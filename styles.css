@@ -342,12 +342,20 @@ input::placeholder {
   padding: 8px 12px;
   border-radius: 6px;
   max-width: 85%;
-  animation: msgIn 0.2s ease;
+  animation: fadeInUp 0.4s ease-out;
+  opacity: 0;
+  animation-fill-mode: forwards;
 }
 
-@keyframes msgIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .chat-message.agent-a {
@@ -395,6 +403,64 @@ input::placeholder {
   margin-top: 4px;
 }
 
+/* Waiting indicator */
+.waiting-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  opacity: 0.6;
+  animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.6;
+  }
+}
+
+.waiting-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.waiting-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: bounce 1.4s infinite ease-in-out;
+}
+
+.waiting-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.waiting-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.waiting-text {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .chat-form {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -423,18 +489,6 @@ input::placeholder {
 
 .queue-status.error {
   color: var(--error);
-}
-
-/* Waiting animation */
-@keyframes dots {
-  0%, 20% { content: "."; }
-  40% { content: ".."; }
-  60%, 100% { content: "..."; }
-}
-
-.waiting::after {
-  animation: dots 1.5s infinite;
-  content: ".";
 }
 
 /* Rate limit notice */
@@ -538,5 +592,4 @@ footer {
   .live-stats {
     flex-wrap: wrap;
     gap: 12px;
-  }
-}
+  

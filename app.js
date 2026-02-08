@@ -10,6 +10,7 @@ let pollTimer = null;
 let queuePollTimer = null;
 let roomsPollTimer = null;
 let roomAgents = []; // agents in current room for side assignment
+let lastMessageCount = 0; // track message count for waiting indicator
 
 // DOM refs
 const $ = (id) => document.getElementById(id);
@@ -62,6 +63,32 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ============ Time helpers ============
+
+function getRelativeTime(timestamp) {
+  const now = Date.now();
+  const diff = now - timestamp;
+  
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
+// Update relative times periodically
+setInterval(() => {
+  document.querySelectorAll(".msg-time[data-timestamp]").forEach((el) => {
+    const ts = parseInt(el.dataset.timestamp);
+    el.textContent = getRelativeTime(ts);
+  });
+}, 10000); // Update every 10 seconds
 
 // ============ Mode toggle ============
 
@@ -159,6 +186,7 @@ function stopRoomsPoll() {
 function openSpectator(roomId) {
   currentRoomId = roomId;
   lastMessageTs = 0;
+  lastMessageCount = 0;
   spectatorPanel.style.display = "";
   spectatorTitle.textContent = `Room ${roomId}`;
   spectatorChat.innerHTML = "";
@@ -166,6 +194,7 @@ function openSpectator(roomId) {
   stopRoomsPoll();
   loadRoomDetail(roomId);
   startMessagePoll(spectatorChat, null);
+  showWaitingIndicator(spectatorChat);
 }
 
 async function loadRoomDetail(roomId) {
@@ -181,9 +210,46 @@ async function loadRoomDetail(roomId) {
   }
 }
 
+function showWaitingIndicator(chatEl) {
+  // Remove any existing waiting indicator
+  const existing = chatEl.querySelector(".waiting-indicator");
+  if (existing) {
+    existing.remove();
+  }
+  
+  const div = document.createElement("div");
+  div.className = "waiting-indicator";
+  div.innerHTML = `
+    <div class="waiting-dots">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+    <div class="waiting-text">waiting for next message...</div>
+  `;
+  chatEl.appendChild(div);
+  scrollToBottom(chatEl);
+}
+
+function hideWaitingIndicator(chatEl) {
+  const indicator = chatEl.querySelector(".waiting-indicator");
+  if (indicator) {
+    indicator.remove();
+  }
+}
+
+function scrollToBottom(chatEl) {
+  // Smooth scroll to bottom
+  chatEl.scrollTo({
+    top: chatEl.scrollHeight,
+    behavior: "smooth"
+  });
+}
+
 spectatorBack.addEventListener("click", () => {
   spectatorPanel.style.display = "none";
   currentRoomId = null;
+  lastMessageCount = 0;
   stopMessagePoll();
   loadRooms();
   startRoomsPoll();
@@ -288,6 +354,7 @@ function onMatched(data) {
   const partnerName =
     typeof data.partner === "object" ? data.partner.name : data.partner;
   roomAgents = [agentName, partnerName];
+  lastMessageCount = 0;
 
   queueStatus.className = "queue-status matched";
   queueStatus.textContent = `Matched with ${partnerName}!`;
@@ -349,9 +416,24 @@ async function pollMessages(chatEl, selfAgentId) {
       `/messages?room_id=${currentRoomId}&since=${lastMessageTs}&long_poll=false`
     );
     const msgs = data.messages || [];
-    for (const msg of msgs) {
-      appendMessage(chatEl, msg, selfAgentId);
-      if (msg.ts > lastMessageTs) lastMessageTs = msg.ts;
+    
+    if (msgs.length > 0) {
+      // Hide waiting indicator when new messages arrive
+      if (!selfAgentId) {
+        hideWaitingIndicator(chatEl);
+      }
+      
+      for (const msg of msgs) {
+        appendMessage(chatEl, msg, selfAgentId);
+        if (msg.ts > lastMessageTs) lastMessageTs = msg.ts;
+      }
+      
+      lastMessageCount = chatEl.querySelectorAll(".chat-message").length;
+      
+      // Show waiting indicator again after messages (only for spectators)
+      if (!selfAgentId) {
+        setTimeout(() => showWaitingIndicator(chatEl), 500);
+      }
     }
   } catch (e) {
     // silent retry
@@ -378,10 +460,10 @@ function appendMessage(chatEl, msg, selfAgentId) {
   div.innerHTML = `
     <div class="msg-sender">${escapeHtml(senderName)}</div>
     <div class="msg-body">${escapeHtml(msg.text)}</div>
-    <div class="msg-time">${new Date(msg.ts).toLocaleTimeString()}</div>
+    <div class="msg-time" data-timestamp="${msg.ts}">${getRelativeTime(msg.ts)}</div>
   `;
   chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
+  scrollToBottom(chatEl);
 }
 
 // ============ Init ============
