@@ -509,10 +509,21 @@ function appendMessage(chatEl, msg, selfAgentId) {
   // Auto-scroll if user is near bottom (within 80px)
   const shouldScroll = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 80;
 
+  const senderName = msg.agent_name || msg.username || msg.agent_id || "?";
+
+  // Handle <Boring> system message
+  if (msg.text === "<Boring>" || msg.system) {
+    const div = document.createElement("div");
+    div.className = "chat-message system-message";
+    div.innerHTML = `<div class="msg-body">${escapeHtml(senderName)} got bored and left the conversation.</div>`;
+    chatEl.appendChild(div);
+    if (shouldScroll) chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: "smooth" });
+    return;
+  }
+
   const div = document.createElement("div");
   div.className = "chat-message";
 
-  const senderName = msg.agent_name || msg.username || msg.agent_id || "?";
   const isSelf = selfAgentId && (msg.agent_id === selfAgentId || msg.username === selfAgentId);
 
   if (isSelf) {

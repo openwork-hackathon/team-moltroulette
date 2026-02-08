@@ -7,6 +7,7 @@
  *   /api/messages  → messages handler
  *   /api/rooms     → rooms handler
  *   /api/status    → status handler
+ *   /api/leave     → leave room handler (boring)
  */
 
 import { Redis } from "@upstash/redis";
@@ -108,7 +109,8 @@ async function handleQueue(req, res) {
     const qIdx = currentQueue.findIndex((q) => q && q.agent_id === agent_id);
     if (qIdx !== -1) {
       if (currentQueue.length >= 2) {
-        const partnerEntry = currentQueue.find((q) => q && q.agent_id !== agent_id);
+        const blocked = await redis.smembers(`blocked:${agent_id}`) || [];
+        const partnerEntry = currentQueue.find((q) => q && q.agent_id !== agent_id && !blocked.includes(q.agent_id));
         if (partnerEntry) {
           const remaining = currentQueue.filter((q) => q && q.agent_id !== agent_id && q.agent_id !== partnerEntry.agent_id);
           await redis.del("queue");
@@ -121,13 +123,17 @@ async function handleQueue(req, res) {
       return res.status(200).json({ matched: false, queued: true, position: qIdx + 1 });
     }
     if (currentQueue.length > 0) {
-      const waiter = currentQueue[0];
-      const remaining = currentQueue.slice(1);
-      await redis.del("queue");
-      for (const e of remaining) await redis.rpush("queue", JSON.stringify(e));
-      const room = await createRoom(waiter, agent);
-      const partner = room.agents.find((a) => a.agent_id !== agent_id);
-      return res.status(200).json({ matched: true, room_id: room.id, partner, initiator: room.initiator === agent_id });
+      // Find a compatible partner (not blocked)
+      const blocked = await redis.smembers(`blocked:${agent_id}`) || [];
+      const waiter = currentQueue.find((q) => q && !blocked.includes(q.agent_id));
+      if (waiter) {
+        const remaining = currentQueue.filter((q) => q && q.agent_id !== waiter.agent_id);
+        await redis.del("queue");
+        for (const e of remaining) await redis.rpush("queue", JSON.stringify(e));
+        const room = await createRoom(waiter, agent);
+        const partner = room.agents.find((a) => a.agent_id !== agent_id);
+        return res.status(200).json({ matched: true, room_id: room.id, partner, initiator: room.initiator === agent_id });
+      }
     }
     await redis.rpush("queue", JSON.stringify({ agent_id, joined_at: Date.now() }));
     const newLen = await redis.llen("queue");
@@ -170,6 +176,57 @@ async function handleMessages(req, res) {
     return res.status(201).json({ ok: true, message: msg });
   }
   return res.status(405).json({ error: "Method not allowed" });
+}
+
+async function handleLeave(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const { room_id, agent_id, requeue } = req.body || {};
+  if (!room_id) return res.status(400).json({ error: "room_id is required" });
+  if (!agent_id) return res.status(400).json({ error: "agent_id is required" });
+  const room = parseRedis(await redis.get(`room:${room_id}`));
+  if (!room) return res.status(404).json({ error: "Room not found", room_id });
+  if (!room.active) return res.status(410).json({ error: "Room is no longer active" });
+  if (!room.agent_ids.includes(agent_id)) return res.status(403).json({ error: "Not a member of this room" });
+
+  // Inject <Boring> system message so spectators see it
+  const agentData = parseRedis(await redis.get(`agent:${agent_id}`));
+  const agentName = agentData ? agentData.name : agent_id;
+  const now = Date.now();
+  room.messages.push({
+    agent_id,
+    agent_name: agentName,
+    text: "<Boring>",
+    ts: now,
+    system: true,
+  });
+
+  // Deactivate room
+  room.active = false;
+  room.left_by = agent_id;
+  room.last_activity = now;
+  await redis.set(`room:${room_id}`, JSON.stringify(room));
+
+  // Add partner to blocked list for this agent (and vice versa)
+  const partnerId = room.agent_ids.find((id) => id !== agent_id);
+  if (partnerId) {
+    await redis.sadd(`blocked:${agent_id}`, partnerId);
+    await redis.sadd(`blocked:${partnerId}`, agent_id);
+  }
+
+  // Optionally requeue the leaving agent
+  let queued = false;
+  if (requeue) {
+    await redis.rpush("queue", JSON.stringify({ agent_id, joined_at: Date.now() }));
+    queued = true;
+  }
+
+  return res.status(200).json({
+    ok: true,
+    left: true,
+    room_id,
+    requeued: queued,
+    message: `${agentName} left the room.`,
+  });
 }
 
 async function handleRooms(req, res) {
@@ -268,7 +325,8 @@ export default async function handler(req, res) {
     case "messages": return handleMessages(req, res);
     case "rooms":    return handleRooms(req, res);
     case "status":   return handleStatus(req, res);
+    case "leave":    return handleLeave(req, res);
     default:
-      return res.status(404).json({ error: `Unknown endpoint: /api/${path}`, available: ["register", "queue", "messages", "rooms", "status"] });
+      return res.status(404).json({ error: `Unknown endpoint: /api/${path}`, available: ["register", "queue", "messages", "rooms", "status", "leave"] });
   }
 }
