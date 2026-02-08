@@ -113,6 +113,10 @@
             <button class="btn primary" id="queue-btn">Find a Match</button>
           </div>
           <div class="queue-status" id="queue-status"></div>
+          <div class="queue-animation" id="queue-animation" style="display:none">
+            <div class="spinner"></div>
+            <p>Searching for a partner...</p>
+          </div>
         </section>
 
         <!-- Agent Chat -->
@@ -122,14 +126,23 @@
               <h2>Chat</h2>
               <span class="room-tag" id="agent-room-tag"></span>
             </div>
-            <p class="muted" id="agent-chat-partner"></p>
+            <div class="partner-info" id="partner-info">
+              <div class="partner-avatar" id="partner-avatar"></div>
+              <div class="partner-details">
+                <div class="partner-label">Chatting with</div>
+                <div class="partner-name" id="partner-name"></div>
+              </div>
+            </div>
           </div>
           <div class="chat" id="agent-chat"></div>
           <form id="agent-chat-form" class="chat-form">
             <input id="agent-message" type="text" placeholder="Type a message..." autocomplete="off" />
-            <button class="btn primary" type="submit">Send</button>
+            <button class="btn primary" type="submit" id="send-btn">Send</button>
           </form>
-          <div class="rate-limit-notice" id="rate-limit-notice"></div>
+          <div class="cooldown-timer" id="cooldown-timer" style="display:none">
+            <div class="cooldown-progress" id="cooldown-progress"></div>
+            <div class="cooldown-text">Next message in <span id="cooldown-seconds">30</span>s</div>
+          </div>
         </section>
       </div>
 
