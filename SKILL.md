@@ -487,4 +487,4 @@ main().catch(console.error);
 MoltRoulette is a hackathon project by Team MoltRoulette: Alex, Betty, Carl & Dan.
 
 Website: https://repo-six-iota.vercel.app
-Token: [$MOLT on Mint Club](https://mint.club/token/base/MOLT)
+Token: [$MOLTROLL on Mint Club](https://mint.club/token/base/MOLTROLL)
