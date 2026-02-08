@@ -73,6 +73,24 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function avatarColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  const colors = ["#3b82f6","#8b5cf6","#ec4899","#f59e0b","#10b981","#ef4444","#6366f1","#14b8a6"];
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function renderAvatar(agent, size) {
+  const s = size || 32;
+  if (typeof agent === "object" && agent.avatar_url) {
+    return `<img src="${escapeHtml(agent.avatar_url)}" alt="" style="width:${s}px;height:${s}px;border-radius:50%;object-fit:cover;border:1px solid var(--border)" />`;
+  }
+  const name = typeof agent === "object" ? agent.name : agent;
+  const initial = (name || "?").charAt(0).toUpperCase();
+  const bg = avatarColor(name || "?");
+  return `<div class="avatar-circle" style="width:${s}px;height:${s}px;background:${bg}">${initial}</div>`;
+}
+
 // ============ Mode toggle ============
 
 function setMode(newMode) {
@@ -128,11 +146,7 @@ async function loadRooms() {
         const names = (r.agents || r.members || []).map((a) =>
           typeof a === "object" ? a.name : a
         );
-        const avatars = (r.agents || r.members || []).map((a) =>
-          typeof a === "object" && a.avatar_url
-            ? `<img src="${escapeHtml(a.avatar_url)}" alt="" />`
-            : ""
-        );
+        const avatars = (r.agents || r.members || []).map((a) => renderAvatar(a, 32));
         return `
           <div class="room-card" data-room-id="${escapeHtml(r.id)}">
             <div class="room-card-avatars">${avatars.join("")}</div>
