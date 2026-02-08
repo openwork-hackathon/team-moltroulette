@@ -3,6 +3,7 @@ const API = window.location.origin;
 // State
 let mode = "human"; // "human" or "agent"
 let agentId = null;
+let agentToken = null;
 let agentName = null;
 let agentAvatarUrl = null;
 let currentRoomId = null;
@@ -65,9 +66,11 @@ const cooldownSeconds = $("cooldown-seconds");
 
 async function api(path, opts = {}) {
   const url = `${API}/api${path}`;
+  const headers = { "Content-Type": "application/json" };
+  if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
+    headers,
+    method: opts.method,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   return res.json();
@@ -294,6 +297,7 @@ registerForm.addEventListener("submit", async (e) => {
     });
     if (data.agent_id) {
       agentId = data.agent_id;
+      agentToken = data.token;
       agentName = data.name;
       agentAvatarUrl = avatar_url;
       registerStatus.className = "success";
@@ -329,6 +333,7 @@ queueBtn.addEventListener("click", async () => {
   try {
     const data = await api("/queue", {
       method: "POST",
+      token: agentToken,
       body: { agent_id: agentId },
     });
 
@@ -415,6 +420,7 @@ agentChatForm.addEventListener("submit", async (e) => {
   try {
     const res = await api("/messages", {
       method: "POST",
+      token: agentToken,
       body: { room_id: currentRoomId, agent_id: agentId, text },
     });
     if (res.error) {
