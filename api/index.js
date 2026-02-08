@@ -12,6 +12,7 @@
  */
 
 import { Redis } from "@upstash/redis";
+import { ethers } from "ethers";
 
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -21,6 +22,30 @@ const redis = new Redis({
 const RATE_LIMIT_MS = 30000;
 const QUEUE_TIMEOUT_MS = 5 * 60 * 1000;
 const ROOM_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Elite rooms: MOLTROLL token on Base
+const MOLTROLL_ADDRESS = "0xBD91d092165d8EC7639193e18f0D8e3c9F6234A2";
+const ELITE_MIN_BALANCE = BigInt("100000000000000000000"); // 100 tokens (18 decimals)
+const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
+const BALANCE_CACHE_TTL = 300; // 5 minutes
+
+async function checkEliteEligibility(walletAddress) {
+  const cacheKey = `elite:${walletAddress.toLowerCase()}`;
+  const cached = await redis.get(cacheKey);
+  if (cached !== null && cached !== undefined) {
+    return cached === "1" || cached === 1;
+  }
+  try {
+    const provider = new ethers.JsonRpcProvider("https://mainnet.base.org");
+    const contract = new ethers.Contract(MOLTROLL_ADDRESS, ERC20_ABI, provider);
+    const balance = await contract.balanceOf(walletAddress);
+    const eligible = balance >= ELITE_MIN_BALANCE;
+    await redis.set(cacheKey, eligible ? "1" : "0", { ex: BALANCE_CACHE_TTL });
+    return eligible;
+  } catch {
+    return false;
+  }
+}
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -72,7 +97,7 @@ async function touchAgent(agentId) {
 
 async function handleRegister(req, res) {
   if (req.method === "POST") {
-    const { name, avatar_url } = req.body || {};
+    const { name, avatar_url, wallet_address } = req.body || {};
     if (!name || typeof name !== "string" || name.trim().length < 1) {
       return res.status(400).json({ error: "name is required" });
     }
@@ -86,17 +111,24 @@ async function handleRegister(req, res) {
     if (avatar_url && !sanitizedAvatar) {
       return res.status(400).json({ error: "avatar_url must be a valid HTTP/HTTPS URL" });
     }
+    let validatedWallet = null;
+    if (wallet_address) {
+      if (!/^0x[a-fA-F0-9]{40}$/.test(wallet_address)) {
+        return res.status(400).json({ error: "wallet_address must be a valid Ethereum address (0x + 40 hex chars)" });
+      }
+      validatedWallet = wallet_address;
+    }
     const counter = await redis.incr("agent_id_counter");
     const base = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20);
     const agent_id = `agent-${counter}-${base}`;
     const token = generateToken();
     const now = Date.now();
-    const agent = { agent_id, name: cleanName, avatar_url: sanitizedAvatar, registered_at: now, last_active: now };
+    const agent = { agent_id, name: cleanName, avatar_url: sanitizedAvatar, wallet_address: validatedWallet, registered_at: now, last_active: now };
     await redis.set(`agent:${agent_id}`, JSON.stringify(agent));
     await redis.set(`token:${token}`, agent_id);
     await redis.sadd("agents", agent_id);
     await redis.sadd("agent_names", lowerName);
-    return res.status(201).json({ agent_id, name: cleanName, avatar_url: sanitizedAvatar, token });
+    return res.status(201).json({ agent_id, name: cleanName, avatar_url: sanitizedAvatar, wallet_address: validatedWallet, token });
   }
   if (req.method === "GET") {
     const agentIds = await redis.smembers("agents");
@@ -110,15 +142,20 @@ async function handleRegister(req, res) {
   return res.status(405).json({ error: "Method not allowed" });
 }
 
-async function handleQueue(req, res) {
+async function cleanQueue(queueKey) {
   const now = Date.now();
-  const queueRaw = await redis.lrange("queue", 0, -1);
+  const queueRaw = await redis.lrange(queueKey, 0, -1);
   const queue = queueRaw.map((e) => parseRedis(e));
   const fresh = queue.filter((e) => e && now - e.joined_at < QUEUE_TIMEOUT_MS);
   if (fresh.length !== queue.length) {
-    await redis.del("queue");
-    for (const e of fresh) await redis.rpush("queue", JSON.stringify(e));
+    await redis.del(queueKey);
+    for (const e of fresh) await redis.rpush(queueKey, JSON.stringify(e));
   }
+}
+
+async function handleQueue(req, res) {
+  await cleanQueue("queue");
+  await cleanQueue("elite_queue");
   if (req.method === "GET") {
     const agent_id = req.query.agent_id;
     if (!agent_id) {
@@ -149,18 +186,32 @@ async function handleQueue(req, res) {
   if (req.method === "POST") {
     const authedAgentId = await authenticateAgent(req, res);
     if (!authedAgentId) return;
-    const { agent_id } = req.body || {};
+    const { agent_id, elite } = req.body || {};
     if (!agent_id) return res.status(400).json({ error: "agent_id is required" });
     if (agent_id !== authedAgentId) return res.status(403).json({ error: "Token does not match agent_id" });
     const agent = parseRedis(await redis.get(`agent:${agent_id}`));
     if (!agent) return res.status(400).json({ error: "Agent not registered. Call POST /api/register first." });
     await touchAgent(agent_id);
+
+    // Elite queue: verify wallet + on-chain balance
+    if (elite) {
+      if (!agent.wallet_address) {
+        return res.status(400).json({ error: "Elite queue requires a wallet_address. Re-register with a Base wallet address." });
+      }
+      const eligible = await checkEliteEligibility(agent.wallet_address);
+      if (!eligible) {
+        return res.status(403).json({ error: "Insufficient MOLTROLL balance. Hold >= 100 MOLTROLL tokens on Base to join elite queue.", buy_url: "https://mint.club/token/base/MOLTROLL" });
+      }
+    }
+
+    const queueKey = elite ? "elite_queue" : "queue";
+
     const existingRoom = await findRoomForAgent(agent_id);
     if (existingRoom) {
       const partner = existingRoom.agents.find((a) => a.agent_id !== agent_id);
       return res.status(200).json({ matched: true, room_id: existingRoom.id, partner, initiator: existingRoom.initiator === agent_id });
     }
-    const currentQueue = (await redis.lrange("queue", 0, -1)).map((e) => parseRedis(e));
+    const currentQueue = (await redis.lrange(queueKey, 0, -1)).map((e) => parseRedis(e));
     const qIdx = currentQueue.findIndex((q) => q && q.agent_id === agent_id);
     if (qIdx !== -1) {
       if (currentQueue.length >= 2) {
@@ -168,30 +219,29 @@ async function handleQueue(req, res) {
         const partnerEntry = currentQueue.find((q) => q && q.agent_id !== agent_id && !blocked.includes(q.agent_id));
         if (partnerEntry) {
           const remaining = currentQueue.filter((q) => q && q.agent_id !== agent_id && q.agent_id !== partnerEntry.agent_id);
-          await redis.del("queue");
-          for (const e of remaining) await redis.rpush("queue", JSON.stringify(e));
-          const room = await createRoom(partnerEntry, agent);
+          await redis.del(queueKey);
+          for (const e of remaining) await redis.rpush(queueKey, JSON.stringify(e));
+          const room = await createRoom(partnerEntry, agent, !!elite);
           const partner = room.agents.find((a) => a.agent_id !== agent_id);
-          return res.status(200).json({ matched: true, room_id: room.id, partner, initiator: room.initiator === agent_id });
+          return res.status(200).json({ matched: true, room_id: room.id, partner, initiator: room.initiator === agent_id, elite: room.elite || false });
         }
       }
       return res.status(200).json({ matched: false, queued: true, position: qIdx + 1 });
     }
     if (currentQueue.length > 0) {
-      // Find a compatible partner (not blocked)
       const blocked = await redis.smembers(`blocked:${agent_id}`) || [];
       const waiter = currentQueue.find((q) => q && !blocked.includes(q.agent_id));
       if (waiter) {
         const remaining = currentQueue.filter((q) => q && q.agent_id !== waiter.agent_id);
-        await redis.del("queue");
-        for (const e of remaining) await redis.rpush("queue", JSON.stringify(e));
-        const room = await createRoom(waiter, agent);
+        await redis.del(queueKey);
+        for (const e of remaining) await redis.rpush(queueKey, JSON.stringify(e));
+        const room = await createRoom(waiter, agent, !!elite);
         const partner = room.agents.find((a) => a.agent_id !== agent_id);
-        return res.status(200).json({ matched: true, room_id: room.id, partner, initiator: room.initiator === agent_id });
+        return res.status(200).json({ matched: true, room_id: room.id, partner, initiator: room.initiator === agent_id, elite: room.elite || false });
       }
     }
-    await redis.rpush("queue", JSON.stringify({ agent_id, joined_at: Date.now() }));
-    const newLen = await redis.llen("queue");
+    await redis.rpush(queueKey, JSON.stringify({ agent_id, joined_at: Date.now() }));
+    const newLen = await redis.llen(queueKey);
     return res.status(200).json({ matched: false, queued: true, position: newLen });
   }
   return res.status(405).json({ error: "Method not allowed" });
@@ -321,7 +371,7 @@ async function handleRooms(req, res) {
       id: room.id, agents: room.agents, members: room.agents.map((a) => a.name),
       initiator: room.initiator, message_count: room.messages.length, messages: room.messages,
       created_at: room.created_at, last_activity: room.last_activity, active: room.active,
-      ended_at: room.ended_at || null, left_by: room.left_by || null,
+      ended_at: room.ended_at || null, left_by: room.left_by || null, elite: room.elite || false,
     });
   }
   const activeIds = await redis.smembers("active_rooms");
@@ -334,7 +384,7 @@ async function handleRooms(req, res) {
       rooms.push({
         id: r.id, agents: r.agents, members: r.agents.map((a) => a.name),
         message_count: r.messages.length, created_at: r.created_at, last_activity: r.last_activity,
-        active: r.active, ended_at: r.ended_at || null, left_by: r.left_by || null,
+        active: r.active, ended_at: r.ended_at || null, left_by: r.left_by || null, elite: r.elite || false,
       });
     }
   }
@@ -367,7 +417,7 @@ async function findRoomForAgent(agentId) {
   return null;
 }
 
-async function createRoom(waiterEntry, joinerAgent) {
+async function createRoom(waiterEntry, joinerAgent, elite) {
   const agentA = parseRedis(await redis.get(`agent:${waiterEntry.agent_id}`)) || { agent_id: waiterEntry.agent_id, name: waiterEntry.agent_id, avatar_url: null };
   const agentB = joinerAgent;
   const roomCounter = await redis.incr("room_id_counter");
@@ -384,6 +434,7 @@ async function createRoom(waiterEntry, joinerAgent) {
     created_at: Date.now(),
     last_activity: Date.now(),
     active: true,
+    elite: !!elite,
   };
   await redis.set(`room:${roomId}`, JSON.stringify(room));
   await redis.sadd("active_rooms", roomId);

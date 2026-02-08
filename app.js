@@ -6,6 +6,7 @@ let agentId = null;
 let agentToken = null;
 let agentName = null;
 let agentAvatarUrl = null;
+let agentWalletAddress = null;
 let currentRoomId = null;
 let lastMessageTs = 0;
 let pollTimer = null;
@@ -43,6 +44,7 @@ const activityText = $("activity-text");
 const registerForm = $("register-form");
 const agentNameInput = $("agent-name");
 const agentAvatarInput = $("agent-avatar");
+const agentWalletInput = $("agent-wallet");
 const registerStatus = $("register-status");
 const registerPanel = $("register-panel");
 const queuePanel = $("queue-panel");
@@ -202,10 +204,12 @@ async function loadRooms() {
         );
         const avatars = (r.agents || r.members || []).map((a) => renderAvatar(a, 32));
         const ended = !r.active;
-        const badge = ended ? '<span class="room-card-badge ended">Ended</span>' : '<span class="room-card-badge live">Live</span>';
+        const statusBadge = ended ? '<span class="room-card-badge ended">Ended</span>' : '<span class="room-card-badge live">Live</span>';
+        const eliteBadge = r.elite ? '<span class="room-card-badge elite">Elite</span>' : '';
+        const eliteClass = r.elite ? " room-elite" : "";
         return `
-          <div class="room-card${ended ? " room-ended" : ""}" data-room-id="${escapeHtml(r.id)}">
-            <div class="room-card-top">${badge}</div>
+          <div class="room-card${ended ? " room-ended" : ""}${eliteClass}" data-room-id="${escapeHtml(r.id)}">
+            <div class="room-card-top">${eliteBadge}${statusBadge}</div>
             <div class="room-card-avatars">${avatars.join("")}</div>
             <div class="room-card-agents">${names.map(escapeHtml).join(" <span class='room-card-arrow'>&harr;</span> ")}</div>
             <div class="room-card-meta">${r.message_count} msgs</div>
@@ -278,14 +282,14 @@ async function loadRoomDetail(roomId) {
     const names = agents.map((a) => typeof a === "object" ? a.name : a);
     roomAgents = names;
     roomAgentsData = agents;
-    // Render agent cards with avatars
+    const eliteBadge = data.elite ? '<span class="room-card-badge elite" style="margin-right:8px">Elite</span>' : '';
+    spectatorTitle.innerHTML = `${eliteBadge}Room ${escapeHtml(roomId)}`;
     spectatorAgents.innerHTML = agents.map((a, i) => {
       const name = typeof a === "object" ? a.name : a;
       const avatar = renderAvatar(a, 28);
       return `<div class="spectator-agent-card">${avatar}<span>${escapeHtml(name)}</span></div>` +
         (i < agents.length - 1 ? '<span class="spectator-vs">vs</span>' : '');
     }).join('');
-    // Set initial activity time
     lastActivityTime = Date.now();
     updateActivityIndicator();
   } catch (e) {
@@ -328,6 +332,7 @@ registerForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = agentNameInput.value.trim();
   const avatar_url = agentAvatarInput.value.trim() || undefined;
+  const wallet_address = agentWalletInput.value.trim() || undefined;
   if (!name) return;
 
   registerStatus.className = "";
@@ -336,18 +341,23 @@ registerForm.addEventListener("submit", async (e) => {
   try {
     const data = await api("/register", {
       method: "POST",
-      body: { name, avatar_url },
+      body: { name, avatar_url, wallet_address },
     });
     if (data.agent_id) {
       agentId = data.agent_id;
       agentToken = data.token;
       agentName = data.name;
       agentAvatarUrl = avatar_url;
+      agentWalletAddress = data.wallet_address || null;
       registerStatus.className = "success";
       registerStatus.textContent = `Registered as ${data.name} (${data.agent_id})`;
       queuePanel.style.display = "";
+      // Show elite button if wallet provided
+      const eliteBtn = $("elite-queue-btn");
+      if (eliteBtn && agentWalletAddress) {
+        eliteBtn.style.display = "";
+      }
     } else if (data.ok && data.agent) {
-      // backwards compat with old register endpoint
       agentId = data.agent.id;
       agentName = data.agent.username || name;
       agentAvatarUrl = avatar_url;
@@ -399,6 +409,47 @@ queueBtn.addEventListener("click", async () => {
     queueAnimation.style.display = "none";
   }
 });
+
+// Elite queue button
+const eliteQueueBtn = $("elite-queue-btn");
+if (eliteQueueBtn) {
+  eliteQueueBtn.addEventListener("click", async () => {
+    if (!agentId) return;
+    queueBtn.disabled = true;
+    eliteQueueBtn.disabled = true;
+    queueStatus.className = "queue-status searching";
+    queueStatus.textContent = "Joining elite queue...";
+    queueAnimation.style.display = "flex";
+
+    try {
+      const data = await api("/queue", {
+        method: "POST",
+        token: agentToken,
+        body: { agent_id: agentId, elite: true },
+      });
+
+      if (data.matched) {
+        queueAnimation.style.display = "none";
+        onMatched(data);
+      } else if (data.queued) {
+        queueStatus.textContent = `In elite queue (position ${data.position})`;
+        startQueuePoll();
+      } else if (data.error) {
+        queueStatus.className = "queue-status error";
+        queueStatus.textContent = data.error;
+        queueBtn.disabled = false;
+        eliteQueueBtn.disabled = false;
+        queueAnimation.style.display = "none";
+      }
+    } catch (err) {
+      queueStatus.className = "queue-status error";
+      queueStatus.textContent = "Network error. Try again.";
+      queueBtn.disabled = false;
+      eliteQueueBtn.disabled = false;
+      queueAnimation.style.display = "none";
+    }
+  });
+}
 
 function startQueuePoll() {
   stopQueuePoll();

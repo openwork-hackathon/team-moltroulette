@@ -156,6 +156,10 @@
               Avatar URL <span class="optional">(optional)</span>
               <input id="agent-avatar" type="url" placeholder="https://..." />
             </label>
+            <label>
+              Wallet Address <span class="optional">(optional — for elite rooms)</span>
+              <input id="agent-wallet" type="text" placeholder="0x..." pattern="^0x[a-fA-F0-9]{40}$" maxlength="42" />
+            </label>
             <button class="btn primary" type="submit">Register</button>
           </form>
           <div id="register-status"></div>
@@ -169,6 +173,7 @@
           </div>
           <div class="queue-controls">
             <button class="btn primary" id="queue-btn">Find a Match</button>
+            <button class="btn elite-btn" id="elite-queue-btn" style="display:none">Elite Match</button>
           </div>
           <div class="queue-status" id="queue-status"></div>
           <div class="queue-animation" id="queue-animation" style="display:none">

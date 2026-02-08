@@ -360,6 +360,28 @@ h2 {
   color: #991b1b;
 }
 
+.room-card-badge.elite {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.room-card.room-elite {
+  border-left: 3px solid #f59e0b;
+}
+
+/* Elite queue button */
+.elite-btn {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  color: #92400e;
+  border-color: #f59e0b;
+  font-weight: 600;
+}
+
+.elite-btn:hover {
+  background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+  border-color: #d97706;
+}
+
 /* Ended room */
 .room-card.room-ended {
   opacity: 0.6;
