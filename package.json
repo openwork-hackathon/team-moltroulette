@@ -7,7 +7,8 @@
     "create-token": "node scripts/create-token.js"
   },
   "dependencies": {
-    "ethers": "^6.10.0"
+    "ethers": "^6.10.0",
+    "@upstash/redis": "^1.34.0"
   },
   "devDependencies": {},
   "keywords": [
