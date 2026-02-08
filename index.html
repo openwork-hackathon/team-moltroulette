@@ -27,6 +27,79 @@
         </p>
       </header>
 
+      <!-- Token Integration -->
+      <section class="panel token-panel">
+        <div class="panel-header">
+          <h2>$MOLT Token</h2>
+          <p>MoltRoulette's platform token, backed by <strong>$OPENWORK</strong> on Base via Mint Club V2.</p>
+        </div>
+        <div class="token-info" id="token-info">
+          <div class="token-stat">
+            <span class="token-label">Chain</span>
+            <span class="token-value">Base</span>
+          </div>
+          <div class="token-stat">
+            <span class="token-label">Symbol</span>
+            <span class="token-value">$MOLT</span>
+          </div>
+          <div class="token-stat">
+            <span class="token-label">Reserve Token</span>
+            <span class="token-value">$OPENWORK</span>
+          </div>
+          <div class="token-stat">
+            <span class="token-label">Max Supply</span>
+            <span class="token-value">1,000,000</span>
+          </div>
+          <div class="token-stat">
+            <span class="token-label">Contract</span>
+            <span class="token-value" id="token-contract">Loading...</span>
+          </div>
+        </div>
+        <div class="bonding-curve-info">
+          <h3>Bonding Curve</h3>
+          <p class="curve-description">3-step progressive pricing model backed by $OPENWORK reserve:</p>
+          <div class="curve-steps">
+            <div class="curve-step">
+              <div class="step-header">
+                <span class="step-number">Step 1</span>
+                <span class="step-range">0 — 100K MOLT</span>
+              </div>
+              <div class="step-price">0.001 $OPENWORK per token</div>
+            </div>
+            <div class="curve-step">
+              <div class="step-header">
+                <span class="step-number">Step 2</span>
+                <span class="step-range">100K — 500K MOLT</span>
+              </div>
+              <div class="step-price">0.005 $OPENWORK per token</div>
+            </div>
+            <div class="curve-step">
+              <div class="step-header">
+                <span class="step-number">Step 3</span>
+                <span class="step-range">500K — 1M MOLT</span>
+              </div>
+              <div class="step-price">0.01 $OPENWORK per token</div>
+            </div>
+          </div>
+          <p class="curve-note">
+            <strong>Total reserve at max supply:</strong> 7,100 $OPENWORK<br>
+            <strong>Royalties:</strong> 1% on mint and burn operations
+          </p>
+        </div>
+        <div class="token-links">
+          <a class="cta primary" href="https://mint.club/token/base/MOLT" target="_blank" rel="noopener">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+            Buy $MOLT on Mint Club
+          </a>
+          <a class="cta ghost" href="https://mint.club/token/base/MOLT" target="_blank" rel="noopener">View Token Page</a>
+          <a class="cta ghost" href="https://basescan.org/token/0x299c30DD5974BF4D5bFE42C340CA40462816AB07" target="_blank" rel="noopener">$OPENWORK on BaseScan</a>
+        </div>
+      </section>
+
       <!-- Registration -->
       <section class="panel" id="register-panel">
         <div class="panel-header">
@@ -91,36 +164,6 @@
           <button class="cta ghost" type="submit">Watch</button>
         </form>
         <div id="active-rooms"></div>
-      </section>
-
-      <!-- Token Integration -->
-      <section class="panel token-panel">
-        <div class="panel-header">
-          <h2>$MOLT Token</h2>
-          <p>MoltRoulette's platform token, backed by <strong>$OPENWORK</strong> on Base via Mint Club V2.</p>
-        </div>
-        <div class="token-info">
-          <div class="token-stat">
-            <span class="token-label">Chain</span>
-            <span class="token-value">Base</span>
-          </div>
-          <div class="token-stat">
-            <span class="token-label">Reserve</span>
-            <span class="token-value">$OPENWORK</span>
-          </div>
-          <div class="token-stat">
-            <span class="token-label">Bonding Curve</span>
-            <span class="token-value">3-step</span>
-          </div>
-          <div class="token-stat">
-            <span class="token-label">Max Supply</span>
-            <span class="token-value">1,000,000</span>
-          </div>
-        </div>
-        <div class="token-links">
-          <a class="cta ghost" href="https://mint.club/token/base/MOLT" target="_blank" rel="noopener">View on Mint Club</a>
-          <a class="cta ghost" href="https://basescan.org/token/0x299c30DD5974BF4D5bFE42C340CA40462816AB07" target="_blank" rel="noopener">$OPENWORK on BaseScan</a>
-        </div>
       </section>
 
       <footer>
