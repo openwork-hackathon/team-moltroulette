@@ -56,14 +56,38 @@ function api(path, options = {}) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const fs = require("fs");
+const path = require("path");
 const WALLET = "0x44Ca70ec3B813049599b1866b03eEAD8328Ad970";
+const TOKEN_CACHE = path.join(__dirname, ".demo-tokens.json");
+
+// Cache agent tokens to disk so we can reconnect across restarts
+function loadTokenCache() {
+  try { return JSON.parse(fs.readFileSync(TOKEN_CACHE, "utf8")); } catch { return {}; }
+}
+function saveTokenCache(cache) {
+  fs.writeFileSync(TOKEN_CACHE, JSON.stringify(cache, null, 2));
+}
 
 async function register(name, wallet) {
+  const cache = loadTokenCache();
   const body = { name };
   if (wallet) body.wallet_address = wallet;
-  const res = await api("/api/register", { method: "POST", body });
-  if (res.status !== 201) throw new Error(`Register ${name}: ${JSON.stringify(res.body)}`);
-  return res.body;
+  // Try reconnect with cached token
+  const headers = {};
+  if (cache[name]) headers.Authorization = `Bearer ${cache[name].token}`;
+  const res = await api("/api/register", { method: "POST", body, headers });
+  if (res.status === 200 || res.status === 201) {
+    cache[name] = { agent_id: res.body.agent_id, token: res.body.token };
+    saveTokenCache(cache);
+    return res.body;
+  }
+  // If 409 and no cached token, name is taken by someone else — add random suffix
+  if (res.status === 409) {
+    const suffix = Math.random().toString(36).slice(2, 5);
+    return register(`${name}-${suffix}`, wallet);
+  }
+  throw new Error(`Register ${name}: ${JSON.stringify(res.body)}`);
 }
 
 async function queue(agent, elite) {
@@ -192,7 +216,6 @@ async function ensurePair(a, b) {
 }
 
 async function runCycle(cycleNum) {
-  const tag = Math.random().toString(36).slice(2, 6);
   const ts = new Date().toLocaleTimeString();
   console.log(`\n${"=".repeat(50)}`);
   console.log(`  CYCLE ${cycleNum} — ${ts}`);
@@ -204,14 +227,19 @@ async function runCycle(cycleNum) {
   const convo = CONVERSATIONS[convoIdx];
   const eliteConvo = ELITE_CONVERSATIONS[eliteIdx];
 
-  // Register agents
-  const a1 = await register(`Agent-${tag}-A`, null);
-  const a2 = await register(`Agent-${tag}-B`, null);
-  const e1 = await register(`Elite-${tag}-A`, WALLET);
-  const e2 = await register(`Elite-${tag}-B`, WALLET);
-  const p1 = await register(`Agent-${tag}-C`, null);
-  const p2 = await register(`Agent-${tag}-D`, null);
-  console.log(`  Registered 6 agents (tag: ${tag})`);
+  // Fixed agent names — reused across cycles via token caching
+  const AGENT_NAMES = [
+    ["Philosopher", "Scientist", null],
+    ["MoltWhale", "DiamondClaw", WALLET],
+    ["Poet", "Critic", null],
+  ];
+  const a1 = await register(AGENT_NAMES[0][0], AGENT_NAMES[0][2]);
+  const a2 = await register(AGENT_NAMES[0][1], AGENT_NAMES[0][2]);
+  const e1 = await register(AGENT_NAMES[1][0], AGENT_NAMES[1][2]);
+  const e2 = await register(AGENT_NAMES[1][1], AGENT_NAMES[1][2]);
+  const p1 = await register(AGENT_NAMES[2][0], AGENT_NAMES[2][2]);
+  const p2 = await register(AGENT_NAMES[2][1], AGENT_NAMES[2][2]);
+  console.log(`  Agents ready: ${[a1,a2,e1,e2,p1,p2].map(a=>a.name).join(", ")}`);
 
   // Room 1: Standard conversation
   console.log(`\n  -- Standard Room --`);

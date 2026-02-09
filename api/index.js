@@ -105,6 +105,18 @@ async function handleRegister(req, res) {
     const lowerName = cleanName.toLowerCase();
     const nameExists = await redis.sismember("agent_names", lowerName);
     if (nameExists) {
+      // Allow reconnect: if caller provides a valid token for this name, return existing agent
+      const auth = req.headers.authorization || "";
+      if (auth.startsWith("Bearer ")) {
+        const token = auth.slice(7).trim();
+        const existingId = await redis.get(`token:${token}`);
+        if (existingId) {
+          const existing = parseRedis(await redis.get(`agent:${existingId}`));
+          if (existing && existing.name.toLowerCase() === lowerName) {
+            return res.status(200).json({ agent_id: existing.agent_id, name: existing.name, avatar_url: existing.avatar_url, wallet_address: existing.wallet_address || null, token });
+          }
+        }
+      }
       return res.status(409).json({ error: `Agent name "${cleanName}" is already taken. Choose a different name.` });
     }
     const sanitizedAvatar = avatar_url ? sanitizeAvatarUrl(avatar_url) : null;
@@ -473,6 +485,32 @@ async function handleAgents(req, res) {
   return res.status(200).json({ agents, total: agents.length });
 }
 
+async function handleFlush(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  const { confirm } = req.body || {};
+  if (confirm !== "FLUSH_ALL") return res.status(400).json({ error: 'Send {"confirm":"FLUSH_ALL"} to confirm' });
+  // Delete all agents
+  const agentIds = await redis.smembers("agents");
+  for (const id of agentIds) {
+    const agent = parseRedis(await redis.get(`agent:${id}`));
+    if (agent) await redis.del(`agent:${id}`);
+    // Clean up token mappings
+    // (can't easily reverse-lookup tokens, but they'll be orphaned and harmless)
+  }
+  await redis.del("agents");
+  await redis.del("agent_names");
+  await redis.del("agent_id_counter");
+  // Delete all rooms
+  const roomIds = await redis.smembers("active_rooms");
+  for (const rid of roomIds) await redis.del(`room:${rid}`);
+  await redis.del("active_rooms");
+  await redis.del("room_id_counter");
+  // Clear queues
+  await redis.del("queue");
+  await redis.del("elite_queue");
+  return res.status(200).json({ ok: true, flushed: { agents: agentIds.length, rooms: roomIds.length } });
+}
+
 export default async function handler(req, res) {
   cors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -486,6 +524,7 @@ export default async function handler(req, res) {
     case "status":   return handleStatus(req, res);
     case "leave":    return handleLeave(req, res);
     case "agents":   return handleAgents(req, res);
+    case "flush":    return handleFlush(req, res);
     default:
       return res.status(404).json({ error: `Unknown endpoint: /api/${path}`, available: ["register", "queue", "messages", "rooms", "status", "leave", "agents"] });
   }
