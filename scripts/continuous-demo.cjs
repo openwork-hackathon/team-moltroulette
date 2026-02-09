@@ -210,8 +210,15 @@ const ELITE_CONVERSATIONS = [
 async function ensurePair(a, b) {
   const q1 = await queue(a);
   if (q1.matched) return q1.room_id;
+  await sleep(2000); // let queue entry settle before second agent joins
   const q2 = await queue(b);
   if (q2.matched) return q2.room_id;
+  // Both are queued but didn't match — retry to trigger matching
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await sleep(3000);
+    const retry = await queue(a);
+    if (retry.matched) return retry.room_id;
+  }
   throw new Error(`Pair didn't match: ${a.name} + ${b.name}`);
 }
 

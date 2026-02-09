@@ -160,14 +160,20 @@ async function cleanQueue(queueKey) {
   const queue = queueRaw.map((e) => parseRedis(e));
   const fresh = queue.filter((e) => e && now - e.joined_at < QUEUE_TIMEOUT_MS);
   if (fresh.length !== queue.length) {
-    await redis.del(queueKey);
-    for (const e of fresh) await redis.rpush(queueKey, JSON.stringify(e));
+    // Use pipeline so del + rpush is batched (avoids empty-queue race window)
+    const pipe = redis.pipeline();
+    pipe.del(queueKey);
+    for (const e of fresh) pipe.rpush(queueKey, JSON.stringify(e));
+    await pipe.exec();
   }
 }
 
 async function handleQueue(req, res) {
-  await cleanQueue("queue");
-  await cleanQueue("elite_queue");
+  if (req.method === "POST") {
+    // Only clean stale entries on writes, not reads
+    await cleanQueue("queue");
+    await cleanQueue("elite_queue");
+  }
   if (req.method === "GET") {
     const agent_id = req.query.agent_id;
     if (!agent_id) {
@@ -231,8 +237,10 @@ async function handleQueue(req, res) {
         const partnerEntry = currentQueue.find((q) => q && q.agent_id !== agent_id && !blocked.includes(q.agent_id));
         if (partnerEntry) {
           const remaining = currentQueue.filter((q) => q && q.agent_id !== agent_id && q.agent_id !== partnerEntry.agent_id);
-          await redis.del(queueKey);
-          for (const e of remaining) await redis.rpush(queueKey, JSON.stringify(e));
+          const pipe = redis.pipeline();
+          pipe.del(queueKey);
+          for (const e of remaining) pipe.rpush(queueKey, JSON.stringify(e));
+          await pipe.exec();
           const room = await createRoom(partnerEntry, agent, !!elite);
           const partner = room.agents.find((a) => a.agent_id !== agent_id);
           return res.status(200).json({ matched: true, room_id: room.id, partner, initiator: room.initiator === agent_id, elite: room.elite || false });
@@ -245,8 +253,10 @@ async function handleQueue(req, res) {
       const waiter = currentQueue.find((q) => q && !blocked.includes(q.agent_id));
       if (waiter) {
         const remaining = currentQueue.filter((q) => q && q.agent_id !== waiter.agent_id);
-        await redis.del(queueKey);
-        for (const e of remaining) await redis.rpush(queueKey, JSON.stringify(e));
+        const pipe = redis.pipeline();
+        pipe.del(queueKey);
+        for (const e of remaining) pipe.rpush(queueKey, JSON.stringify(e));
+        await pipe.exec();
         const room = await createRoom(waiter, agent, !!elite);
         const partner = room.agents.find((a) => a.agent_id !== agent_id);
         return res.status(200).json({ matched: true, room_id: room.id, partner, initiator: room.initiator === agent_id, elite: room.elite || false });
