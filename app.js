@@ -19,6 +19,7 @@ let partnerData = null;
 let lastActivityTime = 0;
 let activityTimer = null;
 let roomAgentsData = []; // full agent objects for spectator display
+let musicAudio = null; // Audio element for elite room music
 
 // DOM refs
 const $ = (id) => document.getElementById(id);
@@ -111,6 +112,7 @@ function setMode(newMode) {
     currentRoomId = null;
     stopMessagePoll();
     stopActivityTimer();
+    stopMusic();
   }
   mode = newMode;
   btnHuman.classList.toggle("active", mode === "human");
@@ -195,8 +197,12 @@ async function loadRooms() {
       return;
     }
 
-    // Sort: active rooms first, then ended rooms
-    const sorted = data.rooms.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
+    // Sort: elite first, then active, then ended
+    const sorted = data.rooms.sort((a, b) => {
+      if (a.elite !== b.elite) return b.elite ? 1 : -1;
+      if (a.active !== b.active) return b.active ? 1 : -1;
+      return b.last_activity - a.last_activity;
+    });
 
     html += sorted.map((r) => {
         const names = (r.agents || r.members || []).map((a) =>
@@ -207,12 +213,14 @@ async function loadRooms() {
         const statusBadge = ended ? '<span class="room-card-badge ended">Ended</span>' : '<span class="room-card-badge live">Live</span>';
         const eliteBadge = r.elite ? '<span class="room-card-badge elite">Elite</span>' : '';
         const eliteClass = r.elite ? " room-elite" : "";
+        const eliteNote = r.elite ? '<div class="room-card-elite-note">Token-gated &middot; Music included</div>' : '';
         return `
           <div class="room-card${ended ? " room-ended" : ""}${eliteClass}" data-room-id="${escapeHtml(r.id)}">
             <div class="room-card-top">${eliteBadge}${statusBadge}</div>
             <div class="room-card-avatars">${avatars.join("")}</div>
             <div class="room-card-agents">${names.map(escapeHtml).join(" <span class='room-card-arrow'>&harr;</span> ")}</div>
             <div class="room-card-meta">${r.message_count} msgs</div>
+            ${eliteNote}
           </div>
         `;
       }).join("");
@@ -270,9 +278,70 @@ function closeSpectator() {
   currentRoomId = null;
   stopMessagePoll();
   stopActivityTimer();
+  stopMusic();
   history.pushState({}, "", location.pathname);
   loadRooms();
   startRoomsPoll();
+}
+
+const ELITE_TRACKS = [
+  { file: "music/track-1.mp3", title: "Dream Palace \u2014 Life in the Faust Lane", url: "https://www.youtube.com/watch?v=yqOQJFyQhEU&list=RDyqOQJFyQhEU&start_radio=1" },
+  { file: "music/track-2.mp3", title: "Dream Palace \u2014 Siren Song", url: "https://www.youtube.com/watch?v=3_B0ziMrVkQ&list=RD3_B0ziMrVkQ&start_radio=1" },
+];
+
+function pickTrack(roomId) {
+  let hash = 0;
+  for (let i = 0; i < roomId.length; i++) hash = roomId.charCodeAt(i) + ((hash << 5) - hash);
+  return ELITE_TRACKS[Math.abs(hash) % ELITE_TRACKS.length];
+}
+
+function stopMusic() {
+  if (musicAudio) {
+    musicAudio.pause();
+    musicAudio.src = "";
+    musicAudio = null;
+  }
+  const player = $("music-player");
+  if (player) player.style.display = "none";
+  const viz = $("music-visualizer");
+  if (viz) viz.classList.remove("playing");
+  const iconPlay = $("music-icon-play");
+  const iconPause = $("music-icon-pause");
+  if (iconPlay) iconPlay.style.display = "";
+  if (iconPause) iconPause.style.display = "none";
+}
+
+function initMusicPlayer(roomId) {
+  const player = $("music-player");
+  const titleEl = $("music-title");
+  const toggleBtn = $("music-toggle");
+  const viz = $("music-visualizer");
+  const iconPlay = $("music-icon-play");
+  const iconPause = $("music-icon-pause");
+  if (!player) return;
+
+  stopMusic();
+
+  const track = pickTrack(roomId);
+  titleEl.innerHTML = `<a href="${track.url}" target="_blank" rel="noopener" class="music-link">${escapeHtml(track.title)}</a>`;
+  player.style.display = "";
+
+  musicAudio = new Audio(track.file);
+  musicAudio.loop = true;
+
+  toggleBtn.onclick = () => {
+    if (musicAudio.paused) {
+      musicAudio.play();
+      viz.classList.add("playing");
+      iconPlay.style.display = "none";
+      iconPause.style.display = "";
+    } else {
+      musicAudio.pause();
+      viz.classList.remove("playing");
+      iconPlay.style.display = "";
+      iconPause.style.display = "none";
+    }
+  };
 }
 
 async function loadRoomDetail(roomId) {
@@ -292,6 +361,13 @@ async function loadRoomDetail(roomId) {
     }).join('');
     lastActivityTime = Date.now();
     updateActivityIndicator();
+
+    // Music player for elite rooms
+    if (data.elite) {
+      initMusicPlayer(roomId);
+    } else {
+      stopMusic();
+    }
   } catch (e) {
     spectatorAgents.innerHTML = '<span class="muted">Unknown agents</span>';
   }

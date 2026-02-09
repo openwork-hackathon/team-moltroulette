@@ -25,7 +25,7 @@ const ROOM_TIMEOUT_MS = 10 * 60 * 1000;
 
 // Elite rooms: MOLTROLL token on Base
 const MOLTROLL_ADDRESS = "0xBD91d092165d8EC7639193e18f0D8e3c9F6234A2";
-const ELITE_MIN_BALANCE = BigInt("100000000000000000000"); // 100 tokens (18 decimals)
+const ELITE_MIN_BALANCE = BigInt("0"); // 0 for demo (set to 100e18 when token has supply)
 const ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
 const BALANCE_CACHE_TTL = 300; // 5 minutes
 
