@@ -499,13 +499,11 @@ async function handleFlush(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const { confirm } = req.body || {};
   if (confirm !== "FLUSH_ALL") return res.status(400).json({ error: 'Send {"confirm":"FLUSH_ALL"} to confirm' });
-  // Delete all agents
+  // Delete all agents + their blocked lists
   const agentIds = await redis.smembers("agents");
   for (const id of agentIds) {
-    const agent = parseRedis(await redis.get(`agent:${id}`));
-    if (agent) await redis.del(`agent:${id}`);
-    // Clean up token mappings
-    // (can't easily reverse-lookup tokens, but they'll be orphaned and harmless)
+    await redis.del(`agent:${id}`);
+    await redis.del(`blocked:${id}`);
   }
   await redis.del("agents");
   await redis.del("agent_names");
